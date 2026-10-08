@@ -18,9 +18,15 @@ jobs:
       - name: Restore signing key
         env:
           DEBUG_KEYSTORE: ${{ secrets.DEBUG_KEYSTORE }}
-        run: mkdir -p ~/.android && echo "$DEBUG_KEYSTORE" | base64 -d > ~/.android/debug.keystore
+        run: echo "$DEBUG_KEYSTORE" | base64 -d > "$RUNNER_TEMP/debug.keystore"
+      # Explicit injected signing: the runner's own debug keystore location is not ~/.android.
       - name: Build
-        run: bash ./gradlew assembleDebug -PversionCode=$((GITHUB_RUN_NUMBER + 1)) -PversionName=${GITHUB_REF_NAME#v}
+        run: >
+          bash ./gradlew assembleDebug -PversionCode=$((GITHUB_RUN_NUMBER + 1)) -PversionName=${GITHUB_REF_NAME#v}
+          -Pandroid.injected.signing.store.file=$RUNNER_TEMP/debug.keystore
+          -Pandroid.injected.signing.store.password=android
+          -Pandroid.injected.signing.key.alias=androiddebugkey
+          -Pandroid.injected.signing.key.password=android
       - name: Release
         env:
           GH_TOKEN: ${{ github.token }}
