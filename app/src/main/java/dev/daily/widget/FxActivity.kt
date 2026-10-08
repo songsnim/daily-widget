@@ -23,6 +23,7 @@ class FxActivity : Activity() {
         const val INDEX = "index"
         const val CELL = "cell"
         const val BAR = "bar"
+        const val RATIO = "ratio"
         const val HABIT = "habit"
         const val WAKE = "wake"
         const val BED = "bed"
@@ -61,12 +62,13 @@ class FxActivity : Activity() {
 
     // The launcher only tells us the tapped cell's screen rect; the widget's own XP bar is found by mapping
     // its widget-space rect through that cell (scale from widths, origin from the cell's corner).
+    // sourceBounds has the on-screen corner but the unscaled view width, hence One UI's shrink ratio.
     private fun widgetBar(): RectF? {
         val b = intent.sourceBounds ?: return null
         val cell = intent.getFloatArrayExtra(CELL) ?: return null
         val bar = intent.getFloatArrayExtra(BAR) ?: return null
         if (cell[2] <= 0f) return null
-        val k = b.width() / cell[2]
+        val k = b.width() / cell[2] * intent.getFloatExtra(RATIO, 1f)
         val x = b.left - cell[0] * k
         val y = b.top - cell[1] * k
         return RectF(x + bar[0] * k, y + bar[1] * k, x + (bar[0] + bar[2]) * k, y + (bar[1] + bar[3]) * k)

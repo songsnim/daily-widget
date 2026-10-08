@@ -2,7 +2,9 @@ package dev.daily.widget
 
 import android.content.Context
 import android.content.Intent
+import android.app.PendingIntent
 import android.net.Uri
+import android.widget.RemoteViews
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.staticCompositionLocalOf
@@ -24,7 +26,9 @@ import androidx.glance.action.ActionParameters
 import androidx.glance.action.actionParametersOf
 import androidx.glance.action.actionStartActivity
 import androidx.glance.action.clickable
+import androidx.glance.appwidget.AndroidRemoteViews
 import androidx.glance.appwidget.GlanceAppWidget
+import androidx.glance.appwidget.LocalAppWidgetOptions
 import androidx.glance.appwidget.GlanceAppWidgetReceiver
 import androidx.glance.appwidget.LinearProgressIndicator
 import androidx.glance.appwidget.SizeMode
@@ -150,7 +154,7 @@ private fun toggleItem(target: String, i: Int, checked: Boolean): Action = actio
 
 // Completing taps play their reward in FxActivity, which also records them. `cell` is the tapped cell's
 // widget-space rect; with the launcher's screen bounds for it, FxActivity finds the XP bar on screen.
-private fun fx(ctx: Context, geo: Geo, cell: FloatArray, kind: String, key: String = "", index: Int = -1): Action = actionStartActivity(
+private fun fx(ctx: Context, geo: Geo, cell: FloatArray, kind: String, key: String = "", index: Int = -1) =
     Intent(ctx, FxActivity::class.java)
         .setData(Uri.parse("daily://fx/$kind/${Uri.encode(key)}/$index"))
         .putExtra(FxActivity.KIND, kind)
@@ -158,8 +162,20 @@ private fun fx(ctx: Context, geo: Geo, cell: FloatArray, kind: String, key: Stri
         .putExtra(FxActivity.INDEX, index)
         .putExtra(FxActivity.CELL, cell)
         .putExtra(FxActivity.BAR, geo.bar)
+        .putExtra(FxActivity.RATIO, geo.ratio)
         .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
-)
+
+// Tap target for fx intents, laid over the cell. Glance only makes immutable PendingIntents, and the launcher
+// can stamp the tapped view's screen rect (Intent.sourceBounds) only onto mutable ones, so these taps go
+// through a raw RemoteViews with our own mutable PendingIntent (explicit component, so that's allowed).
+@Composable
+private fun FxHit(intent: Intent, cell: Boolean) {
+    val ctx = LocalContext.current
+    val rv = RemoteViews(ctx.packageName, if (cell) R.layout.fx_hit_cell else R.layout.fx_hit)
+    rv.setOnClickPendingIntent(R.id.hit, PendingIntent.getActivity(ctx, 0, intent,
+        PendingIntent.FLAG_MUTABLE or PendingIntent.FLAG_UPDATE_CURRENT))
+    AndroidRemoteViews(rv, GlanceModifier.fillMaxSize())
+}
 
 private fun obsidian(path: String) = Intent(
     Intent.ACTION_VIEW, Uri.parse("obsidian://open?vault=${Uri.encode(Vault.NAME)}&file=${Uri.encode(path)}"),
@@ -203,7 +219,9 @@ private const val MOCK_MIN_HEIGHT = 260f
 
 // Widget-space rects (x, y, w, h in dp) mirroring Scaled's layout, for the cells that open FxActivity
 // and for the XP bar. Keep in step with the layout below.
-private class Geo(private val w: Float, h: Float) {
+// `ratio`: One UI's hsResizeRatio, how much the launcher shrinks the laid-out widget on screen. sourceBounds
+// carries the cell's on-screen corner but its unscaled width, so FxActivity needs this to get the real scale.
+private class Geo(private val w: Float, h: Float, val ratio: Float = 1f) {
     val s = minOf(w / MOCK_WIDTH, h / MOCK_MIN_HEIGHT)
     private val bottomY = h - 118 * s // padding 6 + bar 4 + gap 5 + bottom row 103
     val bar = floatArrayOf(10 * s, h - 10 * s, w - 20 * s, 4 * s)
@@ -220,7 +238,8 @@ private val Int.s: TextUnit @Composable get() = (this * LocalGeo.current.s).sp
 @Composable
 private fun Content(s: State, flash: String?, xp: Int) {
     val size = LocalSize.current
-    CompositionLocalProvider(LocalGeo provides Geo(size.width.value, size.height.value)) { Scaled(s, flash, xp) }
+    val ratio = (LocalAppWidgetOptions.current.get("hsResizeRatio") as? Number)?.toFloat()?.takeIf { it > 0f } ?: 1f
+    CompositionLocalProvider(LocalGeo provides Geo(size.width.value, size.height.value, ratio)) { Scaled(s, flash, xp) }
 }
 
 @Composable
@@ -277,8 +296,8 @@ private fun ColumnScope.Habits(ctx: Context, s: State, surface: ColorProvider) {
         if (i > 0) Spacer(GlanceModifier.height(4.d))
         val done = props[key] == "true"
         val geo = LocalGeo.current
-        Toggle(key, done, if (done) record(key, "false") else fx(ctx, geo, geo.habit(i), FxActivity.HABIT, key), surface,
-            GlanceModifier.fillMaxWidth().defaultWeight())
+        Toggle(key, done, if (done) record(key, "false") else null, surface, GlanceModifier.fillMaxWidth().defaultWeight(),
+            hit = if (done) null else fx(ctx, geo, geo.habit(i), FxActivity.HABIT, key))
     }
 }
 
@@ -298,13 +317,15 @@ private fun RowScope.Values(ctx: Context, s: State, flash: String?, surface: Col
     val wake = Frontmatter.time(props["기상"])
     Cell(if (browsing) "${s.day.monthValue}/${s.day.dayOfMonth} 기상" else "오늘 기상", wake ?: "기록",
         if (wake != null) Tone.VALUE else Tone.CTA,
-        if (wake == null && !browsing) fx(ctx, geo, geo.value(1), FxActivity.WAKE) else open(ctx, SheetActivity::class.java, SheetActivity.KEY, "기상", sheetDate),
-        surface, GlanceModifier.defaultWeight(), captionColor = if (browsing) BLUE else SUB)
+        if (wake == null && !browsing) null else open(ctx, SheetActivity::class.java, SheetActivity.KEY, "기상", sheetDate),
+        surface, GlanceModifier.defaultWeight(), captionColor = if (browsing) BLUE else SUB,
+        hit = if (wake == null && !browsing) fx(ctx, geo, geo.value(1), FxActivity.WAKE) else null)
     Spacer(GlanceModifier.width(4.d))
     val bed = s.bed
     Cell("취침", bed ?: "기록", if (bed != null) Tone.VALUE else Tone.CTA,
-        if (bed == null && !browsing) fx(ctx, geo, geo.value(2), FxActivity.BED) else open(ctx, SheetActivity::class.java, SheetActivity.KEY, "취침", sheetDate),
-        surface, GlanceModifier.defaultWeight())
+        if (bed == null && !browsing) null else open(ctx, SheetActivity::class.java, SheetActivity.KEY, "취침", sheetDate),
+        surface, GlanceModifier.defaultWeight(),
+        hit = if (bed == null && !browsing) fx(ctx, geo, geo.value(2), FxActivity.BED) else null)
     Spacer(GlanceModifier.width(4.d))
     // Opens Digital Wellbeing's dashboard; the note is the fallback where it isn't installed.
     val wellbeing = ctx.packageManager.getLaunchIntentForPackage(ScreenTime.WELLBEING) ?: obsidian("${Vault.DAYS}/${Vault.name(s.day)}")
@@ -336,8 +357,9 @@ private fun GoalRow(ctx: Context, k: Int, p: Period, goals: List<Goal>?, today: 
             }
             return@Row
         }
-        Box(GlanceModifier.fillMaxHeight().padding(start = 2.d, end = 10.d)
-            .clickable(if (goal.checked) toggleItem(p.name, i, false) else LocalGeo.current.let { fx(ctx, it, it.goal(k), FxActivity.GOAL, p.name, i) }), contentAlignment = Alignment.Center) {
+        val geo = LocalGeo.current
+        CheckArea(30.d, 2.d, if (goal.checked) toggleItem(p.name, i, false) else null,
+            if (goal.checked) null else fx(ctx, geo, geo.goal(k), FxActivity.GOAL, p.name, i)) {
             Box(GlanceModifier.size(18.d).background(if (goal.checked) BLUE else box).cornerRadius(5.d)) {}
         }
         val real = goals.filter { it.text.isNotEmpty() }
@@ -349,6 +371,17 @@ private fun GoalRow(ctx: Context, k: Int, p: Period, goals: List<Goal>?, today: 
                 modifier = GlanceModifier.padding(start = 8.d, end = 8.d),
                 style = TextStyle(color = SUB, fontSize = 12.s))
         }
+    }
+}
+
+// A checkbox's tap area, `width` wide (Geo.goal/task) with the box `start` in: the area itself takes a Glance
+// `action`, or an FxHit is laid over it. Fixed width, since a fill-size FxHit would otherwise widen it.
+@Composable
+private fun CheckArea(width: Dp, start: Dp, action: Action?, hit: Intent?, content: @Composable () -> Unit) {
+    Box(GlanceModifier.width(width).fillMaxHeight()) {
+        val area = GlanceModifier.fillMaxSize().padding(start = start)
+        Box(if (action != null) area.clickable(action) else area, contentAlignment = Alignment.CenterStart) { content() }
+        if (hit != null) FxHit(hit, cell = false)
     }
 }
 
@@ -376,8 +409,7 @@ private fun BacklogList(ctx: Context, items: List<Goal>, box: ColorProvider, sur
             val geo = LocalGeo.current
             shown.forEachIndexed { row, (i, item) ->
                 Row(GlanceModifier.fillMaxWidth().defaultWeight(), verticalAlignment = Alignment.CenterVertically) {
-                    Box(GlanceModifier.fillMaxHeight().padding(start = 10.d, end = 8.d)
-                        .clickable(fx(ctx, geo, geo.task(row), FxActivity.TASK, index = i)), contentAlignment = Alignment.Center) {
+                    CheckArea(34.d, 10.d, null, fx(ctx, geo, geo.task(row), FxActivity.TASK, index = i)) {
                         Box(GlanceModifier.size(16.d).background(box).cornerRadius(8.d)) {}
                     }
                     Text(item.text, maxLines = 1, modifier = GlanceModifier.defaultWeight().clickable(open),
@@ -420,12 +452,14 @@ private fun ColumnScope.DayNav(surface: ColorProvider) {
 // laid over the fill. Fill, ring and the press ripple share this one box and its 14dp outline, so their
 // corners always agree. A filled (done) cell drops the ring; the fill alone carries state.
 @Composable
+// `hit` (an fx intent) replaces `action` for reward taps; see FxHit.
 private fun Bordered(bg: ColorProvider, modifier: GlanceModifier, action: Action? = null, ring: Boolean = true,
-                     content: @Composable () -> Unit) {
+                     hit: Intent? = null, content: @Composable () -> Unit) {
     val box = modifier.background(bg).cornerRadius(CELL_RADIUS)
     Box(if (action != null) box.clickable(action) else box) {
         Box(GlanceModifier.fillMaxSize(), contentAlignment = Alignment.Center) { content() }
         if (ring) Box(GlanceModifier.fillMaxSize().background(ImageProvider(R.drawable.cell_ring))) {}
+        if (hit != null) FxHit(hit, cell = true)
     }
 }
 
@@ -433,10 +467,10 @@ private fun Bordered(bg: ColorProvider, modifier: GlanceModifier, action: Action
 private val CELL_RADIUS = 14.dp
 
 @Composable
-private fun Toggle(label: String, done: Boolean, action: Action, surface: ColorProvider,
-                   modifier: GlanceModifier) {
+private fun Toggle(label: String, done: Boolean, action: Action?, surface: ColorProvider,
+                   modifier: GlanceModifier, hit: Intent? = null) {
     Box(modifier) {
-        Bordered(if (done) BLUE else surface, GlanceModifier.fillMaxSize(), action, ring = !done) {
+        Bordered(if (done) BLUE else surface, GlanceModifier.fillMaxSize(), action, ring = !done, hit = hit) {
             Text(label, maxLines = 1, style = TextStyle(
                 color = if (done) TEXT else SUB, fontSize = 15.s, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center))
         }
@@ -445,14 +479,14 @@ private fun Toggle(label: String, done: Boolean, action: Action, surface: ColorP
 
 @Composable
 private fun Cell(caption: String, value: String, tone: Tone, action: Action?, surface: ColorProvider,
-                 modifier: GlanceModifier, captionColor: ColorProvider = SUB, lit: Boolean = false) {
+                 modifier: GlanceModifier, captionColor: ColorProvider = SUB, lit: Boolean = false, hit: Intent? = null) {
     val valueStyle = when (tone) {
         Tone.VALUE -> TextStyle(color = TEXT, fontSize = 14.s, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center)
         Tone.CTA -> TextStyle(color = BLUE, fontSize = 14.s, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center)
         Tone.EMPTY -> TextStyle(color = FAINT, fontSize = 14.s, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center)
     }
     Box(modifier.fillMaxHeight()) {
-        Bordered(if (lit) BLUE else surface, GlanceModifier.fillMaxSize(), action, ring = !lit) {
+        Bordered(if (lit) BLUE else surface, GlanceModifier.fillMaxSize(), action, ring = !lit, hit = hit) {
             Column(verticalAlignment = Alignment.CenterVertically, horizontalAlignment = Alignment.CenterHorizontally) {
                 Text(caption, maxLines = 1, style = TextStyle(color = captionColor, fontSize = 13.s, textAlign = TextAlign.Center))
                 Text(value, maxLines = 1, style = valueStyle)
