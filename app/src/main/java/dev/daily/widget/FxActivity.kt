@@ -5,7 +5,10 @@ import android.graphics.PointF
 import android.graphics.RectF
 import android.os.Bundle
 import android.view.WindowManager
+import android.view.View
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.MainScope
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -52,12 +55,27 @@ class FxActivity : Activity() {
             // The launcher passes the tapped cell's screen rect; the screen centre is the fallback.
             val from = intent.sourceBounds?.let { PointF(it.exactCenterX(), it.exactCenterY()) }
                 ?: PointF(resources.displayMetrics.widthPixels / 2f, resources.displayMetrics.heightPixels * .6f)
+            // One UI's launcher slides widget launches up whatever we ask for, so draw nothing until the window
+            // has settled; otherwise the bar rises from below and reads as a second bar.
+            withTimeoutOrNull(800) { entered.await() }
             view.play(show, from, bar) {
                 // The overlay's last frame stays up while the widget redraws at the new total, then both match.
                 Store.releaseXp(applicationContext)
-                scope.launch { delay(400); finish() }
+                scope.launch {
+                    delay(400)
+                    view.visibility = View.INVISIBLE // empty before the exit animation, so nothing slides away
+                    delay(50)
+                    finish()
+                }
             }
         }
+    }
+
+    private val entered = CompletableDeferred<Unit>()
+
+    override fun onEnterAnimationComplete() {
+        super.onEnterAnimationComplete()
+        entered.complete(Unit)
     }
 
     // The launcher only tells us the tapped cell's screen rect; the widget's own XP bar is found by mapping
