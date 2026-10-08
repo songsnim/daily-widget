@@ -2,6 +2,7 @@ package dev.daily.widget
 
 import android.app.Activity
 import android.graphics.PointF
+import android.graphics.RectF
 import android.os.Bundle
 import android.view.WindowManager
 import kotlinx.coroutines.MainScope
@@ -19,6 +20,8 @@ class FxActivity : Activity() {
         const val KIND = "kind"
         const val KEY = "key"
         const val INDEX = "index"
+        const val CELL = "cell"
+        const val BAR = "bar"
         const val HABIT = "habit"
         const val WAKE = "wake"
         const val BED = "bed"
@@ -44,8 +47,21 @@ class FxActivity : Activity() {
             // The launcher passes the tapped cell's screen rect; the screen centre is the fallback.
             val from = intent.sourceBounds?.let { PointF(it.exactCenterX(), it.exactCenterY()) }
                 ?: PointF(resources.displayMetrics.widthPixels / 2f, resources.displayMetrics.heightPixels * .6f)
-            view.play(show, from) { finish() }
+            view.play(show, from, widgetBar()) { finish() }
         }
+    }
+
+    // The launcher only tells us the tapped cell's screen rect; the widget's own XP bar is found by mapping
+    // its widget-space rect through that cell (scale from widths, origin from the cell's corner).
+    private fun widgetBar(): RectF? {
+        val b = intent.sourceBounds ?: return null
+        val cell = intent.getFloatArrayExtra(CELL) ?: return null
+        val bar = intent.getFloatArrayExtra(BAR) ?: return null
+        if (cell[2] <= 0f) return null
+        val k = b.width() / cell[2]
+        val x = b.left - cell[0] * k
+        val y = b.top - cell[1] * k
+        return RectF(x + bar[0] * k, y + bar[1] * k, x + (bar[0] + bar[2]) * k, y + (bar[1] + bar[3]) * k)
     }
 
     override fun onDestroy() {

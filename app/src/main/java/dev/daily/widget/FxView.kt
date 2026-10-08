@@ -117,9 +117,11 @@ class FxView(ctx: Context) : View(ctx) {
     private var orbN = 0
     private var gainLabel = ""
     private var gainColor = Color.WHITE
-    private val barW get() = width * .8f
-    private val barX get() = (width - barW) / 2
-    private val barY get() = rootWindowInsets?.systemWindowInsetTop?.plus(56 * dp) ?: (80 * dp)
+    // The widget's own bar when FxActivity could place it on screen; otherwise a bar near the top.
+    private var widgetBar: RectF? = null
+    private val barW get() = widgetBar?.width() ?: (width * .8f)
+    private val barX get() = widgetBar?.left ?: ((width - barW) / 2)
+    private val barY get() = widgetBar?.centerY() ?: (rootWindowInsets?.systemWindowInsetTop?.plus(56 * dp) ?: (80 * dp))
     private fun shown() = barBase + landed
     private fun head() = PointF(barX + barW * min(1f, shown() / Xp.TARGET.toFloat()), barY)
 
@@ -135,14 +137,19 @@ class FxView(ctx: Context) : View(ctx) {
         text.setShadowLayer(3 * dp, 0f, dp, 0xCC000000.toInt())
         text.color = if (over) 0xFFFFD66B.toInt() else Color.WHITE; text.alpha = (255 * a).toInt()
         val label = "이번 주 · $v / ${Xp.TARGET} XP" + if (v > Xp.TARGET) " · 목표 초과" else ""
-        c.drawText(label, barX, barY - 9 * dp, text)
+        val wb = widgetBar
+        val h = wb?.height()?.coerceAtLeast(3 * dp) ?: (5 * dp)
+        // On the widget the labels go just below its bottom edge, so they never cover the cells.
+        val labelY = if (wb != null) barY + h / 2 + 17 * dp else barY - 9 * dp
+        c.drawText(label, barX, labelY, text)
         text.textAlign = Paint.Align.RIGHT; text.color = gainColor; text.alpha = (255 * a).toInt()
-        c.drawText(gainLabel, barX + barW, barY - 9 * dp, text)
+        c.drawText(gainLabel, barX + barW, labelY, text)
         text.clearShadowLayer(); text.textAlign = Paint.Align.CENTER
-        val h = 5 * dp
         val track = RectF(barX, barY - h / 2, barX + barW, barY + h / 2)
         paint.reset(); paint.isAntiAlias = true
-        paint.color = 0x24FFFFFF; paint.alpha = (0x24 * a).toInt()
+        // Over the widget the track is opaque: the widget bar underneath already shows the new total.
+        if (wb != null) { paint.color = 0xFF34343C.toInt(); paint.alpha = (255 * a).toInt() }
+        else { paint.color = 0x24FFFFFF; paint.alpha = (0x24 * a).toInt() }
         c.drawRoundRect(track, h, h, paint)
         val fillW = barW * min(1f, v / Xp.TARGET.toFloat())
         if (fillW > 0) {
@@ -575,8 +582,9 @@ class FxView(ctx: Context) : View(ctx) {
     }
 
     // ---------- entry ----------
-    fun play(s: Show, from: PointF, done: () -> Unit) {
+    fun play(s: Show, from: PointF, bar: RectF?, done: () -> Unit) {
         onDone = done
+        widgetBar = bar
         barBase = s.before
         post {
             t0 = SystemClock.uptimeMillis(); last = t0

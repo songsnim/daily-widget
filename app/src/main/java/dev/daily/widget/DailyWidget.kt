@@ -147,13 +147,16 @@ private fun toggleItem(target: String, i: Int, checked: Boolean): Action = actio
     actionParametersOf(PERIOD to target, INDEX to i, CHECKED to checked)
 )
 
-// Completing taps play their reward in FxActivity, which also records them.
-private fun fx(ctx: Context, kind: String, key: String = "", index: Int = -1): Action = actionStartActivity(
+// Completing taps play their reward in FxActivity, which also records them. `cell` is the tapped cell's
+// widget-space rect; with the launcher's screen bounds for it, FxActivity finds the XP bar on screen.
+private fun fx(ctx: Context, geo: Geo, cell: FloatArray, kind: String, key: String = "", index: Int = -1): Action = actionStartActivity(
     Intent(ctx, FxActivity::class.java)
         .setData(Uri.parse("daily://fx/$kind/${Uri.encode(key)}/$index"))
         .putExtra(FxActivity.KIND, kind)
         .putExtra(FxActivity.KEY, key)
         .putExtra(FxActivity.INDEX, index)
+        .putExtra(FxActivity.CELL, cell)
+        .putExtra(FxActivity.BAR, geo.bar)
         .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
 )
 
@@ -191,16 +194,32 @@ private val TRACK = ColorProvider(Color(0x24FFFFFF))
 private enum class Tone { VALUE, CTA, EMPTY }
 
 // One UI lays a widget out larger than it shows it and scales it down (hsResizeRatio ~0.71 for 5x3),
-// so plain dp/sp come out small. Sizes here are written for the 362dp-wide mockup and scaled
-// to the real width, which keeps the proportions tuned on the comparison page.
+// so plain dp/sp come out small. Sizes here are written for the 362dp-wide mockup and scaled to the real
+// width, which keeps the proportions tuned on the comparison page. A shorter-than-mockup widget scales
+// by height instead so everything still fits; extra height goes to the goals box.
 private const val MOCK_WIDTH = 362f
-private val LocalScale = staticCompositionLocalOf { 1f }
-private val Int.d: Dp @Composable get() = (this * LocalScale.current).dp
-private val Int.s: TextUnit @Composable get() = (this * LocalScale.current).sp
+private const val MOCK_MIN_HEIGHT = 260f
+
+// Widget-space rects (x, y, w, h in dp) mirroring Scaled's layout, for the cells that open FxActivity
+// and for the XP bar. Keep in step with the layout below.
+private class Geo(private val w: Float, h: Float) {
+    val s = minOf(w / MOCK_WIDTH, h / MOCK_MIN_HEIGHT)
+    private val bottomY = h - 118 * s // padding 6 + bar 4 + gap 5 + bottom row 103
+    val bar = floatArrayOf(10 * s, h - 10 * s, w - 20 * s, 4 * s)
+    fun value(i: Int): FloatArray { val cw = (w - 28 * s) / 5; return floatArrayOf(6 * s + i * (cw + 4 * s), 6 * s, cw, 53 * s) }
+    fun habit(i: Int): FloatArray { val hh = 95 * s / 3; return floatArrayOf(6 * s, bottomY + i * (hh + 4 * s), 50 * s, hh) }
+    fun goal(k: Int): FloatArray { val rh = (bottomY - 71 * s) / 3; return floatArrayOf(50 * s, 65 * s + k * rh, 30 * s, rh) }
+    fun task(row: Int): FloatArray { val rh = 101 * s / 4; return floatArrayOf(60 * s, bottomY + s + row * rh, 34 * s, rh) }
+}
+
+private val LocalGeo = staticCompositionLocalOf { Geo(MOCK_WIDTH, MOCK_MIN_HEIGHT) }
+private val Int.d: Dp @Composable get() = (this * LocalGeo.current.s).dp
+private val Int.s: TextUnit @Composable get() = (this * LocalGeo.current.s).sp
 
 @Composable
 private fun Content(s: State, flash: String?) {
-    CompositionLocalProvider(LocalScale provides LocalSize.current.width.value / MOCK_WIDTH) { Scaled(s, flash) }
+    val size = LocalSize.current
+    CompositionLocalProvider(LocalGeo provides Geo(size.width.value, size.height.value)) { Scaled(s, flash) }
 }
 
 @Composable
@@ -218,15 +237,12 @@ private fun Scaled(s: State, flash: String?) {
             Cell("설정", s.problem, Tone.VALUE, actionStartActivity<MainActivity>(), surface, GlanceModifier.fillMaxSize())
             return@Column
         }
-        // 5x3 (~271dp), layout P2: values 53 | goals (rest, ~97) | habits + backlog + add 103.
+        // 5x3 (~271dp), layout P2: values 53 | goals (rest, ~86) | habits + backlog + add 103 | XP bar.
         Row(GlanceModifier.fillMaxWidth().height(53.d)) { Values(ctx, s, flash, surface) }
         Spacer(GlanceModifier.height(4.d))
         Bordered(surface, GlanceModifier.fillMaxWidth().defaultWeight()) {
             Column(GlanceModifier.fillMaxSize().padding(horizontal = 4.d, vertical = 2.d)) {
-                Period.entries.forEach { GoalRow(ctx, it, s.goals(it), s.today, box, GlanceModifier.defaultWeight()) }
-                // This week's XP, the same gold bar the reward overlay fills.
-                LinearProgressIndicator(minOf(1f, s.xp / Xp.TARGET.toFloat()),
-                    GlanceModifier.fillMaxWidth().height(3.d).padding(horizontal = 8.d).cornerRadius(2.dp), GOLD, TRACK)
+                Period.entries.forEachIndexed { k, p -> GoalRow(ctx, k, p, s.goals(p), s.today, box, GlanceModifier.defaultWeight()) }
             }
         }
         Spacer(GlanceModifier.height(4.d))
@@ -242,6 +258,12 @@ private fun Scaled(s: State, flash: String?) {
                 DayNav(surface)
             }
         }
+        // This week's XP; the reward overlay fills this same bar in place (Geo.bar).
+        Spacer(GlanceModifier.height(5.d))
+        Box(GlanceModifier.fillMaxWidth().height(4.d).padding(horizontal = 4.d)) {
+            LinearProgressIndicator(minOf(1f, s.xp / Xp.TARGET.toFloat()),
+                GlanceModifier.fillMaxSize().cornerRadius(2.dp), GOLD, TRACK)
+        }
     }
 }
 
@@ -252,13 +274,16 @@ private fun ColumnScope.Habits(ctx: Context, s: State, surface: ColorProvider) {
     HABITS.forEachIndexed { i, key ->
         if (i > 0) Spacer(GlanceModifier.height(4.d))
         val done = props[key] == "true"
-        Toggle(key, done, if (done) record(key, "false") else fx(ctx, FxActivity.HABIT, key), surface, GlanceModifier.fillMaxWidth().defaultWeight())
+        val geo = LocalGeo.current
+        Toggle(key, done, if (done) record(key, "false") else fx(ctx, geo, geo.habit(i), FxActivity.HABIT, key), surface,
+            GlanceModifier.fillMaxWidth().defaultWeight())
     }
 }
 
 @Composable
 private fun RowScope.Values(ctx: Context, s: State, flash: String?, surface: ColorProvider) {
     val props = s.props
+    val geo = LocalGeo.current
     // Empty time cell: one tap records now, so it says "기록". Recorded: open the sheet so a stray tap never overwrites.
     // Browsing another day: "now" means nothing there, so always the sheet, and the first caption names the day.
     val browsing = s.day != s.today
@@ -271,12 +296,12 @@ private fun RowScope.Values(ctx: Context, s: State, flash: String?, surface: Col
     val wake = Frontmatter.time(props["기상"])
     Cell(if (browsing) "${s.day.monthValue}/${s.day.dayOfMonth} 기상" else "오늘 기상", wake ?: "기록",
         if (wake != null) Tone.VALUE else Tone.CTA,
-        if (wake == null && !browsing) fx(ctx, FxActivity.WAKE) else open(ctx, SheetActivity::class.java, SheetActivity.KEY, "기상", sheetDate),
+        if (wake == null && !browsing) fx(ctx, geo, geo.value(1), FxActivity.WAKE) else open(ctx, SheetActivity::class.java, SheetActivity.KEY, "기상", sheetDate),
         surface, GlanceModifier.defaultWeight(), captionColor = if (browsing) BLUE else SUB)
     Spacer(GlanceModifier.width(4.d))
     val bed = s.bed
     Cell("취침", bed ?: "기록", if (bed != null) Tone.VALUE else Tone.CTA,
-        if (bed == null && !browsing) fx(ctx, FxActivity.BED) else open(ctx, SheetActivity::class.java, SheetActivity.KEY, "취침", sheetDate),
+        if (bed == null && !browsing) fx(ctx, geo, geo.value(2), FxActivity.BED) else open(ctx, SheetActivity::class.java, SheetActivity.KEY, "취침", sheetDate),
         surface, GlanceModifier.defaultWeight())
     Spacer(GlanceModifier.width(4.d))
     // Opens Digital Wellbeing's dashboard; the note is the fallback where it isn't installed.
@@ -295,7 +320,7 @@ private fun RowScope.Values(ctx: Context, s: State, flash: String?, surface: Col
 
 // One period per row, like life-dashboard's collapsed mobile preview: the first non-blank goal with a live checkbox.
 @Composable
-private fun GoalRow(ctx: Context, p: Period, goals: List<Goal>?, today: LocalDate, box: ColorProvider, modifier: GlanceModifier) {
+private fun GoalRow(ctx: Context, k: Int, p: Period, goals: List<Goal>?, today: LocalDate, box: ColorProvider, modifier: GlanceModifier) {
     val sheet = listSheet(ctx, p.name)
     // Same split as the backlog: box toggles, text edits. The label opens the note itself once it exists.
     val label = if (goals != null) actionStartActivity(obsidian("${p.folder}/${p.name(today)}")) else sheet
@@ -310,7 +335,7 @@ private fun GoalRow(ctx: Context, p: Period, goals: List<Goal>?, today: LocalDat
             return@Row
         }
         Box(GlanceModifier.fillMaxHeight().padding(start = 2.d, end = 10.d)
-            .clickable(if (goal.checked) toggleItem(p.name, i, false) else fx(ctx, FxActivity.GOAL, p.name, i)), contentAlignment = Alignment.Center) {
+            .clickable(if (goal.checked) toggleItem(p.name, i, false) else LocalGeo.current.let { fx(ctx, it, it.goal(k), FxActivity.GOAL, p.name, i) }), contentAlignment = Alignment.Center) {
             Box(GlanceModifier.size(18.d).background(if (goal.checked) BLUE else box).cornerRadius(5.d)) {}
         }
         val real = goals.filter { it.text.isNotEmpty() }
@@ -346,10 +371,11 @@ private fun BacklogList(ctx: Context, items: List<Goal>, box: ColorProvider, sur
                 }
                 return@Column
             }
-            shown.forEach { (i, item) ->
+            val geo = LocalGeo.current
+            shown.forEachIndexed { row, (i, item) ->
                 Row(GlanceModifier.fillMaxWidth().defaultWeight(), verticalAlignment = Alignment.CenterVertically) {
                     Box(GlanceModifier.fillMaxHeight().padding(start = 10.d, end = 8.d)
-                        .clickable(fx(ctx, FxActivity.TASK, index = i)), contentAlignment = Alignment.Center) {
+                        .clickable(fx(ctx, geo, geo.task(row), FxActivity.TASK, index = i)), contentAlignment = Alignment.Center) {
                         Box(GlanceModifier.size(16.d).background(box).cornerRadius(8.d)) {}
                     }
                     Text(item.text, maxLines = 1, modifier = GlanceModifier.defaultWeight().clickable(open),
