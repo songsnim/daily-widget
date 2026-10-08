@@ -7,6 +7,7 @@ import android.os.Bundle
 import android.view.WindowManager
 import kotlinx.coroutines.MainScope
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.time.LocalDate
 import java.time.LocalDateTime
@@ -42,12 +43,19 @@ class FxActivity : Activity() {
         val index = intent.getIntExtra(INDEX, -1)
         scope.launch {
             if (Store.state.value == null) Store.refresh(applicationContext)
+            val bar = widgetBar()
+            // Keep the widget bar at the old total so the overlay can fill it in place.
+            if (bar != null) Store.xpHold.value = Store.state.value?.xp
             val show = Store.state.value?.takeIf { it.problem == null }?.let { perform(kind, key, index) }
-            if (show == null) { finish(); return@launch }
+            if (show == null) { Store.releaseXp(applicationContext); finish(); return@launch }
             // The launcher passes the tapped cell's screen rect; the screen centre is the fallback.
             val from = intent.sourceBounds?.let { PointF(it.exactCenterX(), it.exactCenterY()) }
                 ?: PointF(resources.displayMetrics.widthPixels / 2f, resources.displayMetrics.heightPixels * .6f)
-            view.play(show, from, widgetBar()) { finish() }
+            view.play(show, from, bar) {
+                // The overlay's last frame stays up while the widget redraws at the new total, then both match.
+                Store.releaseXp(applicationContext)
+                scope.launch { delay(400); finish() }
+            }
         }
     }
 
@@ -65,6 +73,7 @@ class FxActivity : Activity() {
     }
 
     override fun onDestroy() {
+        Store.releaseXp(applicationContext) // never leave the widget bar stuck if the activity dies early
         scope.cancel()
         super.onDestroy()
     }

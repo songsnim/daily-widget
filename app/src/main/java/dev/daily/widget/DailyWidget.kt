@@ -76,7 +76,8 @@ class DailyWidget : GlanceAppWidget() {
         provideContent {
             val s by Store.state.collectAsState()
             val flash by Store.flash.collectAsState()
-            s?.let { Content(it, flash) }
+            val hold by Store.xpHold.collectAsState()
+            s?.let { Content(it, flash, hold ?: it.xp) }
         }
     }
 }
@@ -217,13 +218,13 @@ private val Int.d: Dp @Composable get() = (this * LocalGeo.current.s).dp
 private val Int.s: TextUnit @Composable get() = (this * LocalGeo.current.s).sp
 
 @Composable
-private fun Content(s: State, flash: String?) {
+private fun Content(s: State, flash: String?, xp: Int) {
     val size = LocalSize.current
-    CompositionLocalProvider(LocalGeo provides Geo(size.width.value, size.height.value)) { Scaled(s, flash) }
+    CompositionLocalProvider(LocalGeo provides Geo(size.width.value, size.height.value)) { Scaled(s, flash, xp) }
 }
 
 @Composable
-private fun Scaled(s: State, flash: String?) {
+private fun Scaled(s: State, flash: String?, xp: Int) {
     val ctx = LocalContext.current
     val opacity = 1f - s.transparency / 100f
     val base = ColorProvider(BASE.copy(alpha = opacity))
@@ -258,11 +259,12 @@ private fun Scaled(s: State, flash: String?) {
                 DayNav(surface)
             }
         }
-        // This week's XP; the reward overlay fills this same bar in place (Geo.bar).
+        // This week's XP. The reward overlay draws its fill exactly over this bar (Geo.bar, same pill shape
+        // and gold) while Store.xpHold keeps it at the old total, so the two read as one bar filling up.
         Spacer(GlanceModifier.height(5.d))
         Box(GlanceModifier.fillMaxWidth().height(4.d).padding(horizontal = 4.d)) {
-            LinearProgressIndicator(minOf(1f, s.xp / Xp.TARGET.toFloat()),
-                GlanceModifier.fillMaxSize().cornerRadius(2.dp), GOLD, TRACK)
+            LinearProgressIndicator(minOf(1f, xp / Xp.TARGET.toFloat()),
+                GlanceModifier.fillMaxSize().cornerRadius(2.d), GOLD, TRACK)
         }
     }
 }

@@ -130,6 +130,7 @@ class FxView(ctx: Context) : View(ctx) {
         val fadeIn = clamp(now / 220f)
         val fadeOut = if (pendingOrbs == 0 && lastLand > 0) 1 - clamp((now - lastLand - 700) / 300f) else 1f
         val a = min(fadeIn, fadeOut)
+        if (widgetBar != null) return drawOnWidget(c, now, a)
         if (a <= 0) return
         val v = shown()
         val over = v >= Xp.TARGET
@@ -137,19 +138,14 @@ class FxView(ctx: Context) : View(ctx) {
         text.setShadowLayer(3 * dp, 0f, dp, 0xCC000000.toInt())
         text.color = if (over) 0xFFFFD66B.toInt() else Color.WHITE; text.alpha = (255 * a).toInt()
         val label = "이번 주 · $v / ${Xp.TARGET} XP" + if (v > Xp.TARGET) " · 목표 초과" else ""
-        val wb = widgetBar
-        val h = wb?.height()?.coerceAtLeast(3 * dp) ?: (5 * dp)
-        // On the widget the labels go just below its bottom edge, so they never cover the cells.
-        val labelY = if (wb != null) barY + h / 2 + 17 * dp else barY - 9 * dp
-        c.drawText(label, barX, labelY, text)
+        c.drawText(label, barX, barY - 9 * dp, text)
         text.textAlign = Paint.Align.RIGHT; text.color = gainColor; text.alpha = (255 * a).toInt()
-        c.drawText(gainLabel, barX + barW, labelY, text)
+        c.drawText(gainLabel, barX + barW, barY - 9 * dp, text)
         text.clearShadowLayer(); text.textAlign = Paint.Align.CENTER
+        val h = 5 * dp
         val track = RectF(barX, barY - h / 2, barX + barW, barY + h / 2)
         paint.reset(); paint.isAntiAlias = true
-        // Over the widget the track is opaque: the widget bar underneath already shows the new total.
-        if (wb != null) { paint.color = 0xFF34343C.toInt(); paint.alpha = (255 * a).toInt() }
-        else { paint.color = 0x24FFFFFF; paint.alpha = (0x24 * a).toInt() }
+        paint.color = 0x24FFFFFF; paint.alpha = (0x24 * a).toInt()
         c.drawRoundRect(track, h, h, paint)
         val fillW = barW * min(1f, v / Xp.TARGET.toFloat())
         if (fillW > 0) {
@@ -161,6 +157,37 @@ class FxView(ctx: Context) : View(ctx) {
             c.drawRoundRect(RectF(barX, track.top, barX + fillW, track.bottom), h, h, paint)
             paint.shader = null; paint.clearShadowLayer()
         }
+    }
+
+    // Over the widget's own bar (held at the old total by Store.xpHold): no track, just the widget's flat gold
+    // fill growing in its exact pill, so it reads as the widget bar filling. The fill never fades; it stays
+    // until the activity releases the hold and the widget bar has caught up underneath. Only labels fade.
+    private fun drawOnWidget(c: Canvas, now: Long, a: Float) {
+        val r = widgetBar!!
+        val v = shown()
+        val h = r.height()
+        val fillW = r.width() * min(1f, v / Xp.TARGET.toFloat())
+        paint.reset(); paint.isAntiAlias = true
+        paint.color = orbGold
+        if (now - bump < 90) paint.setShadowLayer(8 * dp, 0f, 0f, 0xFFFFB21F.toInt())
+        // Like the widget's progress bar: a square-ended fill clipped by the whole track's pill outline.
+        if (fillW > 0) {
+            c.save()
+            c.clipPath(Path().apply { addRoundRect(r, h / 2, h / 2, Path.Direction.CW) })
+            c.drawRect(r.left, r.top, r.left + fillW, r.bottom, paint)
+            c.restore()
+        }
+        paint.clearShadowLayer()
+        if (a <= 0) return
+        // Labels sit just below the widget's bottom edge so they never cover its cells.
+        val y = r.bottom + 17 * dp
+        text.typeface = heavy; text.textSize = 12 * dp; text.textAlign = Paint.Align.LEFT
+        text.setShadowLayer(3 * dp, 0f, dp, 0xCC000000.toInt())
+        text.color = if (v >= Xp.TARGET) 0xFFFFD66B.toInt() else Color.WHITE; text.alpha = (255 * a).toInt()
+        c.drawText("이번 주 · $v / ${Xp.TARGET} XP" + if (v > Xp.TARGET) " · 목표 초과" else "", r.left, y, text)
+        text.textAlign = Paint.Align.RIGHT; text.color = gainColor; text.alpha = (255 * a).toInt()
+        c.drawText(gainLabel, r.right, y, text)
+        text.clearShadowLayer(); text.textAlign = Paint.Align.CENTER
     }
 
     // ---------- shared visual vocabulary ----------

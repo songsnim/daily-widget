@@ -46,6 +46,8 @@ object Store {
     val state = MutableStateFlow<State?>(null)
     // Short-lived reward text on the 평가 cell ("+1") after a tap raises the score.
     val flash = MutableStateFlow<String?>(null)
+    // XP the widget bar shows instead of the live total while FxActivity's overlay fills it in place.
+    val xpHold = MutableStateFlow<Int?>(null)
     private var offset = 0L
     private var shiftedAt = 0L
     private val pending = AtomicInteger()
@@ -54,6 +56,14 @@ object Store {
     private val day = DateTimeFormatter.ofPattern("M월 d일(E)", Locale.KOREAN)
 
     fun dayLabel(date: LocalDate): String = date.format(day)
+
+    // Lets the widget bar catch up once the overlay is gone; outlives the activity that held it.
+    fun releaseXp(ctx: Context) {
+        if (xpHold.value == null) return
+        xpHold.value = null
+        val app = ctx.applicationContext
+        scope.launch { DailyWidget().updateAll(app) }
+    }
 
     suspend fun shift(ctx: Context, delta: Long) {
         offset = if (delta == 0L) 0 else offset + delta
