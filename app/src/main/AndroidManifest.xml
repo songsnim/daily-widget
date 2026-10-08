@@ -25,6 +25,7 @@
 
     <application
         android:label="Daily"
+        android:icon="@mipmap/ic_launcher"
         android:theme="@style/App">
 
         <activity

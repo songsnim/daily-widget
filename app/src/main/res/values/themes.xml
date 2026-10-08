@@ -25,4 +25,5 @@
     </style>
 
     <color name="base">#FF17171C</color>
+    <color name="ic_launcher_bg">#FF1E1E1E</color>
 </resources>
