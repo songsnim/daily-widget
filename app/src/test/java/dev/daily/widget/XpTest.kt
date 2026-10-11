@@ -5,7 +5,7 @@ import org.junit.Test
 import java.time.LocalDate
 
 class XpTest {
-    private val tue = LocalDate.of(2026, 10, 6) // week of Sun 10-04
+    private val tue = LocalDate.of(2026, 10, 6) // week of Mon 10-05
     private fun m(d: LocalDate, id: String) = Xp.rarity(d, id).mult
 
     @Test
@@ -24,10 +24,10 @@ class XpTest {
             Vault.daily(mon) to "---\n운동: true\nbackfill: true\n---", // imputed: ignored
             Vault.period(Period.WEEK, tue) to "### Goal\n- [x] a ✅ 2026-10-06\n- [x] b ✅ 2026-10-05",
             Vault.period(Period.MONTH, tue) to "### Goal\n- [x] c ✅ 2026-09-30\n- [ ] d",
-            Vault.backlog to "- [x] t ✅ 2026-10-03\n- [x] u ✅ 2026-10-04\n- [x] old",
+            Vault.backlog to "- [x] t ✅ 2026-10-04\n- [x] u ✅ 2026-10-05\n- [x] old",
         ).mapKeys { it.key.path }
         val expected = 10 * m(tue, "독서") + 20 * m(tue, "운동") + 20 * m(tue, "금주") + Xp.DAY_BONUS + 20 * m(tue, "기상") +
-            100 * m(tue, "WEEK:a") + 100 * m(mon, "WEEK:b") + Xp.WEEK_BONUS + 10 * m(LocalDate.of(2026, 10, 4), "task:u")
+            100 * m(tue, "WEEK:a") + 100 * m(mon, "WEEK:b") + Xp.WEEK_BONUS + 10 * m(mon, "task:u")
         assertEquals(expected, Xp.week(tue) { notes[it.path] })
     }
 

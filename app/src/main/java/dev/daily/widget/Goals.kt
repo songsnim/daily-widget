@@ -19,10 +19,11 @@ enum class Period(val label: String, val title: String, val folder: String, val 
     // How far a browsed period is from now: "이번 주", "-3주", "+1달".
     fun relative(n: Long) = if (n == 0L) current else "%+d%s".format(n, unit)
 
-    // Matches Periodic Notes, not life-dashboard: "YYYY [Week] ww" is a Sunday-start locale week
-    // (week 1 contains Jan 1) prefixed with the calendar year, so 2026-12-28 is "2026 Week 01".
+    // Matches Periodic Notes, not life-dashboard: "YYYY [Week] ww" is a Monday-start locale week (calendar
+    // plugin weekStart=monday keeps moment's doy 6, so week 1 contains Jan 2) prefixed with the calendar
+    // year, so 2026-12-28 is "2026 Week 01".
     fun name(date: LocalDate): String = when (this) {
-        WEEK -> "%d Week %02d".format(date.year, date.get(WeekFields.of(DayOfWeek.SUNDAY, 1).weekOfWeekBasedYear()))
+        WEEK -> "%d Week %02d".format(date.year, date.get(WeekFields.of(DayOfWeek.MONDAY, 2).weekOfWeekBasedYear()))
         MONTH -> "%d-%02d".format(date.year, date.monthValue)
         YEAR -> "${date.year}"
     }

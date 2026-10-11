@@ -6,7 +6,7 @@ import java.time.LocalDate
 import java.time.temporal.TemporalAdjusters
 
 // Weekly XP, derived from the notes alone (nothing stored): habits and 기상 from daily notes, goals and
-// backlog items by their "✅ date" stamp. Resets every Sunday, like the week notes.
+// backlog items by their "✅ date" stamp. Resets every Monday, like the week notes.
 object Xp {
     const val TARGET = 1000
     const val TASK = 10
@@ -28,7 +28,7 @@ object Xp {
     fun goalId(p: Period, text: String) = "${p.name}:$text"
     fun taskId(text: String) = "task:$text"
 
-    private fun week(today: LocalDate) = today.with(TemporalAdjusters.previousOrSame(DayOfWeek.SUNDAY)).let { start ->
+    private fun week(today: LocalDate) = today.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY)).let { start ->
         (0L..6L).map { start.plusDays(it) }
     }
 

@@ -31,8 +31,8 @@ class GoalsTest {
 
     @Test
     fun periodNamesMatchPeriodicNotes() {
-        assertEquals("2026 Week 09", Period.WEEK.name(LocalDate.of(2026, 2, 22))) // Sunday starts the week
-        assertEquals("2026 Week 08", Period.WEEK.name(LocalDate.of(2026, 2, 21)))
+        assertEquals("2026 Week 09", Period.WEEK.name(LocalDate.of(2026, 2, 23))) // Monday starts the week
+        assertEquals("2026 Week 08", Period.WEEK.name(LocalDate.of(2026, 2, 22)))
         assertEquals("2026 Week 01", Period.WEEK.name(LocalDate.of(2026, 12, 28)))
         assertEquals("2026-10", Period.MONTH.name(LocalDate.of(2026, 10, 5)))
         assertEquals("2026", Period.YEAR.name(LocalDate.of(2026, 10, 5)))
