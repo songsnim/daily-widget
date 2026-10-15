@@ -31,7 +31,6 @@ class FxActivity : Activity() {
         const val WAKE = "wake"
         const val BED = "bed"
         const val GOAL = "goal"
-        const val TASK = "task"
     }
 
     private val scope = MainScope()
@@ -139,11 +138,6 @@ class FxActivity : Activity() {
                 val text = Goals.parse(Store.state.value!!.note(Vault.period(p, today)).orEmpty()).getOrNull(index)?.text ?: return null
                 val tier = when (p) { Period.WEEK -> Tier.WEEK; Period.MONTH -> Tier.MONTH; Period.YEAR -> Tier.YEAR }
                 show(tier, Xp.rarity(today, Xp.goalId(p, text)), Xp.goal(p), all = goals.all { it.checked }, title = text)
-            }
-            TASK -> {
-                Store.editBacklog(this, check(Backlog, index, today))
-                val text = Store.state.value!!.backlog.getOrNull(index)?.text ?: return null
-                show(Tier.TASK, Xp.rarity(today, Xp.taskId(text)), Xp.TASK)
             }
             else -> null
         }

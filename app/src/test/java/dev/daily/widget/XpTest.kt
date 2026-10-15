@@ -27,7 +27,7 @@ class XpTest {
             Vault.backlog to "- [x] t ✅ 2026-10-04\n- [x] u ✅ 2026-10-05\n- [x] old",
         ).mapKeys { it.key.path }
         val expected = 10 * m(tue, "독서") + 20 * m(tue, "운동") + 20 * m(tue, "금주") + Xp.DAY_BONUS + 20 * m(tue, "기상") +
-            100 * m(tue, "WEEK:a") + 100 * m(mon, "WEEK:b") + Xp.WEEK_BONUS + 10 * m(mon, "task:u")
+            100 * m(tue, "WEEK:a") + 100 * m(mon, "WEEK:b") + Xp.WEEK_BONUS
         assertEquals(expected, Xp.week(tue) { notes[it.path] })
     }
 

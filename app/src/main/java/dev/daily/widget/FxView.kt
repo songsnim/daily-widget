@@ -32,7 +32,7 @@ import kotlin.math.pow
 import kotlin.math.sin
 import kotlin.math.sqrt
 
-enum class Tier { TASK, HABIT, WEEK, MONTH, YEAR, WAKE, WAKE_LOW, BED }
+enum class Tier { HABIT, WEEK, MONTH, YEAR, WAKE, WAKE_LOW, BED }
 
 // What one tap earned. gain = the item's XP after its rarity roll, bonus = a completion bonus it unlocked
 // (완벽한 하루 / 주간·월간 올클리어); both 0 when the note lies outside this week.
@@ -623,11 +623,6 @@ class FxView(ctx: Context) : View(ctx) {
     private fun stage(s: Show, from: PointF) {
         val center = PointF(width / 2f, height * .36f)
         when (s.tier) {
-            Tier.TASK -> {
-                buzz(Triple(PRIMITIVE_CLICK, .6f, 0))
-                burst(from.x, from.y, .4f, conf = false)
-                reward(s, from, intArrayOf(1, 2, 3), 330, small = true)
-            }
             Tier.HABIT -> {
                 buzz(Triple(PRIMITIVE_CLICK, .8f, 0), Triple(PRIMITIVE_THUD, .5f, 30))
                 burst(from.x, from.y)

@@ -49,6 +49,14 @@
             android:theme="@style/Sheet" />
 
         <activity
+            android:name=".ScoreSheetActivity"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:noHistory="true"
+            android:taskAffinity=""
+            android:theme="@style/Sheet" />
+
+        <activity
             android:name=".GoalSheetActivity"
             android:exported="false"
             android:excludeFromRecents="true"

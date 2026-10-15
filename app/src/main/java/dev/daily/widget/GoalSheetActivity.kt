@@ -22,34 +22,40 @@ import dev.daily.widget.Ui.topRound
 import kotlinx.coroutines.runBlocking
 import java.time.LocalDate
 
-// Full list for one period's goals or for the backlog: toggle, edit, delete, add. Every change shows at once and is written
+// Full list for one period's goals, a day's todos or the backlog: toggle, edit, delete, add. Every change shows at once and is written
 // in the background through Store, so closing the sheet never loses or waits on a write.
 class GoalSheetActivity : Activity() {
     companion object {
-        const val PERIOD = "period" // a Period name, or BACKLOG
+        const val PERIOD = "period" // a Period name, BACKLOG or TODAY
         const val BACKLOG = "BACKLOG"
+        const val TODAY = "TODAY"
+        const val DAY = "day" // TODAY's date; the day the widget shows
         const val FOCUS_ADD = "focusAdd"
     }
 
     private var period: Period? = null
-    private val checklist: Checklist get() = if (period == null) Backlog else Goals
+    private var day: LocalDate? = null // set for TODAY
+    private val checklist: Checklist get() = if (day != null) Todos else if (period == null) Backlog else Goals
     private lateinit var list: LinearLayout
     private var clearing = false
     // Periods away from the current one, moved with the header arrows.
     private var offset = 0L
     private val date get() = period?.shift(LocalDate.now(), offset) ?: LocalDate.now()
-    private val note get() = period?.let { Vault.period(it, date) } ?: Vault.backlog
+    private val note get() = day?.let(Vault::daily) ?: period?.let { Vault.period(it, date) } ?: Vault.backlog
     private lateinit var name: TextView
     private lateinit var badge: TextView
+    private lateinit var add: EditText
 
     private fun edit(transform: (String) -> String) {
-        period?.let { Store.editGoals(this, it, transform, date) } ?: Store.editBacklog(this, transform)
+        day?.let { Store.editTodos(this, it, transform) }
+            ?: period?.let { Store.editGoals(this, it, transform, date) } ?: Store.editBacklog(this, transform)
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val target = intent.getStringExtra(PERIOD) ?: return finish()
         period = Period.entries.firstOrNull { it.name == target }
+        if (target == TODAY) day = intent.getStringExtra(DAY)?.let(LocalDate::parse) ?: LocalDate.now()
         // Edits apply to the cached notes first; make sure there is a cache when the widget never loaded.
         if (Store.state.value == null) runBlocking { Store.refresh(this@GoalSheetActivity) }
 
@@ -70,7 +76,7 @@ class GoalSheetActivity : Activity() {
             gravity = Gravity.CENTER_VERTICAL
             addView(LinearLayout(context).apply {
                 orientation = LinearLayout.VERTICAL
-                addView(text(period?.title ?: "백로그", 20f, bold = true))
+                addView(text(if (day != null) "오늘 할 일" else period?.title ?: "백로그", 20f, bold = true))
                 addView(LinearLayout(context).apply {
                     setPadding(0, dp(6), 0, 0)
                     addView(name)
@@ -86,7 +92,7 @@ class GoalSheetActivity : Activity() {
         }, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply { bottomMargin = dp(16) })
         list = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         sheet.addView(ScrollView(this).apply { addView(list) })
-        val add = input(if (period == null) "할 일 추가" else "목표 추가").apply {
+        add = input(if (period == null) "할 일 추가" else "목표 추가").apply {
             background = round(Ui.SURFACE, 14)
             setPadding(dp(16), dp(14), dp(16), dp(14))
             // Enter adds and keeps focus for the next one; the IME action respects Korean composition.
@@ -125,7 +131,7 @@ class GoalSheetActivity : Activity() {
         ?: Vault.read(note)?.let(checklist::parse).orEmpty()
 
     private fun render() {
-        name.text = period?.name(date) ?: "기한 없는 할 일"
+        name.text = day?.let { "${Store.dayLabel(it)} · 1개당 평가 0.5점" } ?: period?.name(date) ?: "기한 없는 할 일"
         period?.let {
             badge.text = it.relative(offset)
             badge.setTextColor(if (offset == 0L) Ui.BLUE else Ui.TEXT)
@@ -135,9 +141,13 @@ class GoalSheetActivity : Activity() {
         clearing = false
         goals().forEachIndexed { i, goal ->
             if (goal.text.isEmpty()) return@forEachIndexed // the template's blank "- [ ] " line
-            if (period == null && goal.checked) return@forEachIndexed // finished backlog items stay in the file only
+            if (day == null && period == null && goal.checked) return@forEachIndexed // finished backlog items stay in the file only
             list.addView(row(i, goal))
         }
+        // The widget shows three todos and scores three; a fourth would only hide.
+        val full = day != null && goals().count { it.text.isNotEmpty() } >= Score.TODOS
+        add.isEnabled = !full
+        add.hint = if (full) "오늘 할 일은 ${Score.TODOS}개까지" else if (period == null) "할 일 추가" else "목표 추가"
     }
 
     private fun row(i: Int, goal: Goal): LinearLayout {

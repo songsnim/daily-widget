@@ -38,8 +38,8 @@ private val DONE = Regex("""\s*✅\s*(\d{4}-\d{2}-\d{2})\s*$""")
 
 // A markdown checklist edited one line at a time so every other byte of the note survives
 // (life-dashboard rewrites the whole section, dropping non-checkbox lines and piling up blank lines).
-// `section` picks the lines the list lives in.
-open class Checklist(private val section: (List<String>) -> IntRange?) {
+// `section` picks the lines the list lives in; `heading` starts one when the note has none.
+open class Checklist(private val heading: String, private val section: (List<String>) -> IntRange?) {
     private val ITEM = Regex("""^(\s*- \[)([ xX])\]\s?(.*)$""")
 
     private fun items(lines: List<String>) = section(lines)?.filter { ITEM.matches(lines[it]) }.orEmpty()
@@ -76,21 +76,28 @@ open class Checklist(private val section: (List<String>) -> IntRange?) {
             section != null -> lines.add(section.first, line)
             else -> {
                 if (lines.last().isNotEmpty()) lines.add("")
-                lines.addAll(listOf("### Goal", line, ""))
+                lines.addAll(listOf("### $heading", line, ""))
             }
         }
         return lines.joinToString("\n")
     }
 }
 
-private val GOAL_HEADING = Regex("""^###\s+Goal\s*$""")
+// The lines under "### <heading>", up to the next "###".
+private fun under(heading: String): (List<String>) -> IntRange? {
+    val re = Regex("""^###\s+$heading\s*$""")
+    return { lines ->
+        val h = lines.indexOfFirst { re.matches(it) }
+        if (h < 0) null
+        else h + 1 until ((h + 1 until lines.size).firstOrNull { lines[it].startsWith("###") } ?: lines.size)
+    }
+}
 
 // The "### Goal" section of a weekly / monthly / yearly note.
-object Goals : Checklist({ lines ->
-    val h = lines.indexOfFirst { GOAL_HEADING.matches(it) }
-    if (h < 0) null
-    else h + 1 until ((h + 1 until lines.size).firstOrNull { lines[it].startsWith("###") } ?: lines.size)
-})
+object Goals : Checklist("Goal", under("Goal"))
+
+// The "### Todo" section of a daily note: the day's three things.
+object Todos : Checklist("Todo", under("Todo"))
 
 // Area/Backlog.md: the whole file is the list.
-object Backlog : Checklist({ lines -> lines.indices })
+object Backlog : Checklist("", { lines -> lines.indices })

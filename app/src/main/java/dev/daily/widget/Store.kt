@@ -37,6 +37,8 @@ data class State(
     val bed get() = Frontmatter.time(Frontmatter.parse(note(Vault.daily(bedDate)))["취침"])
     fun goals(p: Period) = note(Vault.period(p, today))?.let(Goals::parse)
     val backlog get() = Backlog.parse(note(Vault.backlog).orEmpty())
+    val todos get() = Todos.parse(note(Vault.daily(day)).orEmpty())
+    val score get() = Score.of(note(Vault.daily(day)), screenMinutes)
     val xp get() = Xp.week(today) { notes[it.path] }
 }
 
@@ -123,9 +125,14 @@ object Store {
     fun editBacklog(ctx: Context, transform: (String) -> String): Job =
         commit(ctx, Vault.backlog, "", "백로그", null, transform)
 
+    // Todos feed 평가, so every edit rewrites the note's score too.
+    fun editTodos(ctx: Context, date: LocalDate, transform: (String) -> String): Job {
+        val live = state.value?.takeIf { it.day == date }?.screenMinutes
+        return commit(ctx, Vault.daily(date), "Daily", "오늘 할 일", null) { Score.apply(transform(it), live) }
+    }
+
     private fun describe(key: String, value: String) = when {
         value.isEmpty() -> "$key 기록 지움"
-        key == Score.BONUS -> if (value == "true") "좋은 하루 +0.5" else "+0.5 취소"
         else -> "$key $value"
     }
 

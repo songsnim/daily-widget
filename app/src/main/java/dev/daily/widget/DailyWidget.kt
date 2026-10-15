@@ -66,7 +66,6 @@ import java.time.format.DateTimeFormatter
 
 private const val BED_CUTOFF_HOUR = 18
 private val HABITS = listOf("독서", "운동", "금주")
-private const val BACKLOG_ROWS = 4
 
 // 취침 belongs to the next day's note so the dashboard can compute 기상 - 취침 within one note.
 fun dateFor(key: String, now: LocalDateTime): LocalDate =
@@ -102,23 +101,26 @@ class RecordAction : ActionCallback {
         val key = parameters[KEY] ?: return
         val now = LocalDateTime.now()
         val value = parameters[VALUE] ?: now.format(DateTimeFormatter.ofPattern("HH:mm"))
-        val score = { Store.state.value?.let { Score.of(it.props, it.screenMinutes) } ?: 0.0 }
         val before = score()
         // Times land in a note that depends on the clock (취침 after 18:00 -> tomorrow), so say where.
-        val job = Store.setProp(context, key, value, Store.dateFor(key, now),
-            announce = parameters[VALUE] == null || key == Score.BONUS)
+        val job = Store.setProp(context, key, value, Store.dateFor(key, now), announce = parameters[VALUE] == null)
         val gain = score() - before
         Haptic.tap(context, gain > 0)
-        if (gain > 0) {
-            // Glance can't animate, so the reward is a brief blue "+N" flash on the 평가 cell.
-            Store.flash.value = "+${Score.format(gain)}"
-            DailyWidget().updateAll(context)
-            delay(1500)
-            Store.flash.value = null
-            DailyWidget().updateAll(context)
-        }
+        flash(context, gain)
         job.join()
     }
+}
+
+private fun score() = Store.state.value?.score ?: 0.0
+
+// Glance can't animate, so a 평가 gain is a brief blue "+N" flash on the 평가 cell.
+private suspend fun flash(context: Context, gain: Double) {
+    if (gain <= 0) return
+    Store.flash.value = "+${Score.format(gain)}"
+    DailyWidget().updateAll(context)
+    delay(1500)
+    Store.flash.value = null
+    DailyWidget().updateAll(context)
 }
 
 class ShiftAction : ActionCallback {
@@ -135,9 +137,17 @@ class GoalToggleAction : ActionCallback {
         val i = parameters[INDEX] ?: return
         val checked = parameters[CHECKED] ?: return
         val period = Period.entries.firstOrNull { it.name == target }
-        val list: Checklist = if (period == null) Backlog else Goals
+        val list: Checklist = if (target == GoalSheetActivity.TODAY) Todos else if (period == null) Backlog else Goals
         val toggle = { text: String -> list.parse(text).getOrNull(i)?.let { list.set(text, i, it.check(checked)) } ?: text }
         Haptic.tap(context, checked)
+        if (target == GoalSheetActivity.TODAY) {
+            val day = Store.state.value?.day ?: return
+            val before = score()
+            val job = Store.editTodos(context, day, toggle)
+            flash(context, score() - before)
+            job.join()
+            return
+        }
         (if (period == null) Store.editBacklog(context, toggle) else Store.editGoals(context, period, toggle)).join()
     }
 }
@@ -147,7 +157,7 @@ private fun record(key: String, value: String? = null): Action = actionRunCallba
     if (value == null) actionParametersOf(KEY to key) else actionParametersOf(KEY to key, VALUE to value)
 )
 
-// target: a Period name or GoalSheetActivity.BACKLOG.
+// target: a Period name, GoalSheetActivity.BACKLOG or GoalSheetActivity.TODAY.
 private fun toggleItem(target: String, i: Int, checked: Boolean): Action = actionRunCallback<GoalToggleAction>(
     actionParametersOf(PERIOD to target, INDEX to i, CHECKED to checked)
 )
@@ -181,11 +191,13 @@ private fun obsidian(path: String) = Intent(
     Intent.ACTION_VIEW, Uri.parse("obsidian://open?vault=${Uri.encode(Vault.NAME)}&file=${Uri.encode(path)}"),
 ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
 
-private fun listSheet(ctx: Context, target: String, focusAdd: Boolean = false): Action = actionStartActivity(
+// day: the date for TODAY's list.
+private fun listSheet(ctx: Context, target: String, focusAdd: Boolean = false, day: LocalDate? = null): Action = actionStartActivity(
     Intent(ctx, GoalSheetActivity::class.java)
-        .setData(Uri.parse("daily://list/$target/$focusAdd"))
+        .setData(Uri.parse("daily://list/$target/$focusAdd/$day"))
         .putExtra(GoalSheetActivity.PERIOD, target)
         .putExtra(GoalSheetActivity.FOCUS_ADD, focusAdd)
+        .putExtra(GoalSheetActivity.DAY, day?.toString())
         .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
 )
 
@@ -226,9 +238,8 @@ private class Geo(private val w: Float, h: Float, val ratio: Float = 1f) {
     private val bottomY = h - 118 * s // padding 6 + bar 4 + gap 5 + bottom row 103
     val bar = floatArrayOf(10 * s, h - 10 * s, w - 20 * s, 4 * s)
     fun value(i: Int): FloatArray { val cw = (w - 28 * s) / 5; return floatArrayOf(6 * s + i * (cw + 4 * s), 6 * s, cw, 53 * s) }
-    fun habit(i: Int): FloatArray { val hh = 95 * s / 3; return floatArrayOf(6 * s, bottomY + i * (hh + 4 * s), 50 * s, hh) }
-    fun goal(k: Int): FloatArray { val rh = (bottomY - 71 * s) / 3; return floatArrayOf(50 * s, 65 * s + k * rh, 30 * s, rh) }
-    fun task(row: Int): FloatArray { val rh = 101 * s / 4; return floatArrayOf(60 * s, bottomY + s + row * rh, 34 * s, rh) }
+    fun habit(i: Int): FloatArray { val hh = 95 * s / 3; return floatArrayOf(6 * s, bottomY + i * (hh + 4 * s), 40 * s, hh) }
+    fun goal(k: Int): FloatArray { val rh = (bottomY - 71 * s) / 3; return floatArrayOf(50 * s, 65 * s + k * rh, 37 * s, rh) }
 }
 
 private val LocalGeo = staticCompositionLocalOf { Geo(MOCK_WIDTH, MOCK_MIN_HEIGHT) }
@@ -257,7 +268,7 @@ private fun Scaled(s: State, flash: String?, xp: Int) {
             Cell("설정", s.problem, Tone.VALUE, actionStartActivity<MainActivity>(), surface, GlanceModifier.fillMaxSize())
             return@Column
         }
-        // 5x3 (~271dp), layout P2: values 53 | goals (rest, ~86) | habits + backlog + add 103 | XP bar.
+        // 5x3 (~271dp): values 53 | goals (rest, ~86) | habits + today + backlog 103 | XP bar.
         Row(GlanceModifier.fillMaxWidth().height(53.d)) { Values(ctx, s, flash, surface) }
         Spacer(GlanceModifier.height(4.d))
         Bordered(surface, GlanceModifier.fillMaxWidth().defaultWeight()) {
@@ -267,15 +278,19 @@ private fun Scaled(s: State, flash: String?, xp: Int) {
         }
         Spacer(GlanceModifier.height(4.d))
         Row(GlanceModifier.fillMaxWidth().height(103.d)) {
-            // Two-letter habit labels need little width; the backlog takes the rest.
-            Column(GlanceModifier.width(50.d).fillMaxHeight()) { Habits(ctx, s, surface) }
+            // Three equal rows: habits down the left (40dp, as narrow as two 15sp letters allow), today's todos
+            // over two rows, the backlog line and day arrows on the third. Every checkbox centre sits at x=68dp.
+            Column(GlanceModifier.width(40.d).fillMaxHeight()) { Habits(ctx, s, surface) }
             Spacer(GlanceModifier.width(4.d))
-            BacklogList(ctx, s.backlog, box, surface, GlanceModifier.defaultWeight())
-            Spacer(GlanceModifier.width(4.d))
-            Column(GlanceModifier.width(38.d).fillMaxHeight()) {
-                AddCell(ctx, s.backlog.count { !it.checked && it.text.isNotEmpty() }, surface)
+            val row = (95f / 3 * LocalGeo.current.s).dp
+            Column(GlanceModifier.defaultWeight().fillMaxHeight()) {
+                TodayList(ctx, s, box, surface, GlanceModifier.fillMaxWidth().height(row * 2 + 4.d))
                 Spacer(GlanceModifier.height(4.d))
-                DayNav(surface)
+                Row(GlanceModifier.fillMaxWidth().height(row)) {
+                    BacklogRow(ctx, s.backlog, box, surface, GlanceModifier.defaultWeight())
+                    Spacer(GlanceModifier.width(4.d))
+                    DayNav(surface)
+                }
             }
         }
         // This week's XP. The reward overlay draws its fill exactly over this bar (Geo.bar, same pill shape
@@ -334,11 +349,10 @@ private fun RowScope.Values(ctx: Context, s: State, flash: String?, surface: Col
         if (screen != null) actionStartActivity(wellbeing) else actionStartActivity<MainActivity>(), surface,
         GlanceModifier.defaultWeight())
     Spacer(GlanceModifier.width(4.d))
-    // Computed live (today's screen time so far); tapping toggles the manual +0.5, shown in the caption.
-    val bonus = props[Score.BONUS] == "true"
-    Cell(flash ?: if (bonus) "평가 +½" else "평가", Score.format(Score.of(props, screen)), Tone.VALUE,
-        record(Score.BONUS, if (bonus) "false" else "true"), surface, GlanceModifier.defaultWeight(),
-        captionColor = if (flash != null) TEXT else if (bonus) BLUE else SUB, lit = flash != null)
+    // Computed live (today's screen time so far); tapping opens the breakdown.
+    Cell(flash ?: "평가", Score.format(s.score), Tone.VALUE,
+        open(ctx, ScoreSheetActivity::class.java, ScoreSheetActivity.DATE, s.day.toString()), surface,
+        GlanceModifier.defaultWeight(), captionColor = if (flash != null) TEXT else SUB, lit = flash != null)
 }
 
 // One period per row, like life-dashboard's collapsed mobile preview: the first non-blank goal with a live checkbox.
@@ -358,7 +372,8 @@ private fun GoalRow(ctx: Context, k: Int, p: Period, goals: List<Goal>?, today: 
             return@Row
         }
         val geo = LocalGeo.current
-        CheckArea(30.d, 2.d, if (goal.checked) toggleItem(p.name, i, false) else null,
+        // Box pushed in 9dp so its centre lines up with the todo and backlog circles below (x=68dp).
+        CheckArea(37.d, 9.d, if (goal.checked) toggleItem(p.name, i, false) else null,
             if (goal.checked) null else fx(ctx, geo, geo.goal(k), FxActivity.GOAL, p.name, i)) {
             Box(GlanceModifier.size(18.d).background(if (goal.checked) BLUE else box).cornerRadius(5.d)) {}
         }
@@ -391,51 +406,70 @@ private fun Label(p: Period) {
         style = TextStyle(color = SUB, fontSize = 12.s))
 }
 
-// Top undone backlog items; checking one completes it and the next slides up. Text opens the full list.
+// The day's todos, at most three; checked ones stay, struck through, so progress shows. Each is 0.5 평가.
 @Composable
-private fun BacklogList(ctx: Context, items: List<Goal>, box: ColorProvider, surface: ColorProvider, modifier: GlanceModifier) {
-    val open = listSheet(ctx, GoalSheetActivity.BACKLOG)
-    val shown = items.withIndex().filter { !it.value.checked && it.value.text.isNotEmpty() }.take(BACKLOG_ROWS)
-    Bordered(surface, modifier.fillMaxHeight()) {
+private fun TodayList(ctx: Context, s: State, box: ColorProvider, surface: ColorProvider, modifier: GlanceModifier) {
+    val open = listSheet(ctx, GoalSheetActivity.TODAY, day = s.day)
+    val add = listSheet(ctx, GoalSheetActivity.TODAY, focusAdd = true, day = s.day)
+    val shown = s.todos.withIndex().filter { it.value.text.isNotEmpty() }.take(Score.TODOS)
+    Bordered(surface, modifier) {
         Column(GlanceModifier.fillMaxSize().padding(vertical = 1.d)) {
             if (shown.isEmpty()) {
-                Row(GlanceModifier.fillMaxSize().clickable(listSheet(ctx, GoalSheetActivity.BACKLOG, focusAdd = true)),
-                    verticalAlignment = Alignment.CenterVertically) {
-                    Text("할 일을 추가해 보세요", maxLines = 1, modifier = GlanceModifier.padding(start = 12.d),
-                        style = TextStyle(color = FAINT, fontSize = 12.s))
+                Row(GlanceModifier.fillMaxSize().clickable(add), verticalAlignment = Alignment.CenterVertically) {
+                    Text("오늘 할 일을 정해 보세요", maxLines = 1, modifier = GlanceModifier.padding(start = 12.d),
+                        style = TextStyle(color = FAINT, fontSize = 13.s))
                 }
                 return@Column
             }
-            val geo = LocalGeo.current
-            shown.forEachIndexed { row, (i, item) ->
+            shown.forEach { (i, item) ->
                 Row(GlanceModifier.fillMaxWidth().defaultWeight(), verticalAlignment = Alignment.CenterVertically) {
-                    CheckArea(34.d, 10.d, null, fx(ctx, geo, geo.task(row), FxActivity.TASK, index = i)) {
-                        Box(GlanceModifier.size(16.d).background(box).cornerRadius(8.d)) {}
+                    CheckArea(34.d, 10.d, toggleItem(GoalSheetActivity.TODAY, i, !item.checked), null) {
+                        Box(GlanceModifier.size(16.d).background(if (item.checked) BLUE else box).cornerRadius(8.d)) {}
                     }
-                    Text(item.text, maxLines = 1, modifier = GlanceModifier.defaultWeight().clickable(open),
-                        style = TextStyle(color = TEXT, fontSize = 12.s))
+                    Text(item.text, maxLines = 1, modifier = GlanceModifier.defaultWeight().clickable(open), style = TextStyle(
+                        color = if (item.checked) SUB else TEXT, fontSize = 13.s,
+                        fontWeight = if (item.checked) FontWeight.Normal else FontWeight.Medium,
+                        textDecoration = if (item.checked) TextDecoration.LineThrough else TextDecoration.None))
                 }
             }
-            // Keep row height fixed when fewer than BACKLOG_ROWS items remain.
-            repeat(BACKLOG_ROWS - shown.size) { Spacer(GlanceModifier.defaultWeight()) }
+            // Free rows keep their height and add a todo when tapped.
+            repeat(Score.TODOS - shown.size) { Box(GlanceModifier.fillMaxWidth().defaultWeight().clickable(add)) {} }
         }
     }
 }
 
+// The backlog as one line: its top undone item (checked off quietly, no reward) and how many wait behind it.
 @Composable
-private fun AddCell(ctx: Context, remaining: Int, surface: ColorProvider) {
-    Bordered(surface, GlanceModifier.fillMaxWidth().height(66.d), listSheet(ctx, GoalSheetActivity.BACKLOG, focusAdd = true)) {
-        Column(horizontalAlignment = Alignment.CenterHorizontally, verticalAlignment = Alignment.CenterVertically) {
-            Text("+", style = TextStyle(color = BLUE, fontSize = 19.s, fontWeight = FontWeight.Bold))
-            Text("$remaining", maxLines = 1, style = TextStyle(color = SUB, fontSize = 12.s))
+private fun BacklogRow(ctx: Context, items: List<Goal>, box: ColorProvider, surface: ColorProvider, modifier: GlanceModifier) {
+    val open = listSheet(ctx, GoalSheetActivity.BACKLOG)
+    val undone = items.withIndex().filter { !it.value.checked && it.value.text.isNotEmpty() }
+    val first = undone.firstOrNull()
+    Bordered(surface, modifier.fillMaxHeight()) {
+        Row(GlanceModifier.fillMaxSize(), verticalAlignment = Alignment.CenterVertically) {
+            if (first == null) {
+                Row(GlanceModifier.fillMaxSize().clickable(listSheet(ctx, GoalSheetActivity.BACKLOG, focusAdd = true)),
+                    verticalAlignment = Alignment.CenterVertically) {
+                    Text("백로그 비어 있음", maxLines = 1, modifier = GlanceModifier.padding(start = 12.d),
+                        style = TextStyle(color = FAINT, fontSize = 12.s))
+                }
+                return@Row
+            }
+            CheckArea(34.d, 10.d, toggleItem(GoalSheetActivity.BACKLOG, first.index, true), null) {
+                Box(GlanceModifier.size(16.d).background(box).cornerRadius(8.d)) {}
+            }
+            Text(first.value.text, maxLines = 1, modifier = GlanceModifier.defaultWeight().clickable(open),
+                style = TextStyle(color = SUB, fontSize = 12.s))
+            if (undone.size > 1) Text("+${undone.size - 1}", maxLines = 1,
+                modifier = GlanceModifier.padding(start = 6.d, end = 10.d).clickable(open),
+                style = TextStyle(color = FAINT, fontSize = 12.s))
         }
     }
 }
 
 // Previous / next day as the two halves of one small cell; the shown day is named on the 기상 caption.
 @Composable
-private fun ColumnScope.DayNav(surface: ColorProvider) {
-    Bordered(surface, GlanceModifier.fillMaxWidth().defaultWeight()) {
+private fun DayNav(surface: ColorProvider) {
+    Bordered(surface, GlanceModifier.width(38.d).fillMaxHeight()) {
         Row(GlanceModifier.fillMaxSize()) {
             listOf("‹" to -1L, "›" to 1L).forEach { (arrow, delta) ->
                 Box(GlanceModifier.defaultWeight().fillMaxHeight()

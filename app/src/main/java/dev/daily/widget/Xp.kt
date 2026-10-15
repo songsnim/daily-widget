@@ -5,11 +5,10 @@ import java.time.DayOfWeek
 import java.time.LocalDate
 import java.time.temporal.TemporalAdjusters
 
-// Weekly XP, derived from the notes alone (nothing stored): habits and 기상 from daily notes, goals and
-// backlog items by their "✅ date" stamp. Resets every Monday, like the week notes.
+// Weekly XP, derived from the notes alone (nothing stored): habits and 기상 from daily notes, goals by
+// their "✅ date" stamp. Backlog items earn nothing; today's todos count toward 평가 instead. Resets every Monday, like the week notes.
 object Xp {
     const val TARGET = 1000
-    const val TASK = 10
     const val WAKE = 20
     const val DAY_BONUS = 50
     const val WEEK_BONUS = 200
@@ -26,7 +25,6 @@ object Xp {
     }
 
     fun goalId(p: Period, text: String) = "${p.name}:$text"
-    fun taskId(text: String) = "task:$text"
 
     private fun week(today: LocalDate) = today.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY)).let { start ->
         (0L..6L).map { start.plusDays(it) }
@@ -37,7 +35,7 @@ object Xp {
 
     // Every note week() reads; Store loads them so the bar follows optimistic edits.
     fun files(today: LocalDate): List<File> =
-        week(today).map(Vault::daily) + Vault.backlog + periodFiles(today).map { it.second }
+        week(today).map(Vault::daily) + periodFiles(today).map { it.second }
 
     fun week(today: LocalDate, note: (File) -> String?): Int {
         val days = week(today)
@@ -56,8 +54,6 @@ object Xp {
             if (p != Period.YEAR && goals.isNotEmpty() && goals.all { it.checked } && inWeek(goals.mapNotNull { it.done }.maxOrNull()))
                 xp += if (p == Period.WEEK) WEEK_BONUS else MONTH_BONUS
         }
-        Backlog.parse(note(Vault.backlog).orEmpty()).filter { it.checked && inWeek(it.done) }
-            .forEach { xp += TASK * rarity(it.done!!, taskId(it.text)).mult }
         return xp
     }
 }
