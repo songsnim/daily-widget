@@ -50,6 +50,25 @@ class GoalsTest {
     }
 
     @Test
+    fun reorderMovesOnlyNamedItems() {
+        val t = "- [x] done\n- [ ] a\nnote\n- [ ] b\n- [ ] c"
+        // hidden item 0 keeps its line; a, b, c rotate through theirs
+        assertEquals("- [x] done\n- [ ] c\nnote\n- [ ] a\n- [ ] b", Backlog.reorder(t, listOf(3, 1, 2)))
+        assertEquals(t, Backlog.reorder(t, listOf(1, 9)))
+    }
+
+    @Test
+    fun big3MarkerRoundTripsAndPinsUnfinished() {
+        val t = Todos.add(Todos.add("### Todo\n- [ ] \n", "메일"), "보고서", big = true)
+        assertEquals("### Todo\n- [ ] 메일\n- [ ] 보고서 🔺\n", t)
+        val done = Todos.set(t, 1, Todos.parse(t)[1].check(true, LocalDate.of(2026, 10, 16)))
+        assertEquals("### Todo\n- [ ] 메일\n- [x] 보고서 🔺 ✅ 2026-10-16\n", done)
+        assertEquals(Goal(true, "보고서", LocalDate.of(2026, 10, 16), big = true), Todos.parse(done)[1])
+        assertEquals(listOf(1, 0), Todos.parse(t).withIndex().toList().bigFirst().map { it.index })
+        assertEquals(listOf(0, 1), Todos.parse(done).withIndex().toList().bigFirst().map { it.index })
+    }
+
+    @Test
     fun browsingPeriodsShiftsAndLabels() {
         val d = LocalDate.of(2026, 10, 6)
         assertEquals("2026 Week 38", Period.WEEK.name(Period.WEEK.shift(d, -3)))

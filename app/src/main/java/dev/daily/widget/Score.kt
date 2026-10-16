@@ -1,10 +1,10 @@
 package dev.daily.widget
 
-// 평가 is computed, not picked: habits, sleep, screen time and today's todos. The parts add up to 6 but the
+// 평가 is computed, not picked: habits, sleep, screen time and today's Big3. The parts add up to 6 but the
 // score stops at 5, so one miss still allows a perfect day.
 object Score {
     const val MAX = 5.0
-    const val TODOS = 3 // the widget shows at most three; more never score
+    const val TODOS = 3 // Big3 per day, and the todos the widget shows
 
     // got / max points for one line of the breakdown sheet.
     data class Part(val label: String, val detail: String, val got: Double, val max: Double)
@@ -17,14 +17,14 @@ object Score {
         }
         val slept = sleep(props)
         val used = minutes(props["스크린타임"])?.toLong() ?: screen
-        val done = minOf(TODOS, Todos.parse(note.orEmpty()).count { it.checked && it.text.isNotEmpty() })
+        val done = minOf(TODOS, Todos.parse(note.orEmpty()).count { it.big && it.checked && it.text.isNotEmpty() })
         return listOf(
             habit("독서", 0.5), habit("운동", 1.0), habit("금주", 1.0),
             Part("수면", slept?.let { "${duration(it)} · 7시간 이상이면 1점" } ?: "기상·취침 기록 없음",
                 if ((slept ?: 0) >= 7 * 60) 1.0 else 0.0, 1.0),
             Part("스크린", used?.let { "${duration(it.toInt())} · 2시간 이하 1점, 3시간 이하 0.5점" } ?: "기록 없음",
                 if (used == null) 0.0 else if (used <= 120) 1.0 else if (used <= 180) 0.5 else 0.0, 1.0),
-            Part("오늘 할 일", "$done/$TODOS 완료 · 1개당 0.5점", done * 0.5, TODOS * 0.5),
+            Part("Big3", "$done/$TODOS 완료 · 1개당 0.5점", done * 0.5, TODOS * 0.5),
         )
     }
 

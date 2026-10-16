@@ -11,7 +11,7 @@ class ScoreTest {
         val habits = "독서: true\n운동: true\n금주: true\n취침: 23:30\n기상: 06:30\n스크린타임: 01:59"
         assertEquals(4.5, Score.of(note(habits), null), 0.0)
         // 6 points of parts, capped at 5; an old manual 보너스 no longer counts
-        assertEquals(5.0, Score.of(note("$habits\n보너스: true", "- [x] a\n- [x] b\n- [ ] c\n"), null), 0.0)
+        assertEquals(5.0, Score.of(note("$habits\n보너스: true", "- [x] a 🔺\n- [x] b 🔺\n- [ ] c 🔺\n"), null), 0.0)
         // 6h59m sleep, 2h30m screen
         assertEquals(0.5, Score.of(note("취침: 23:31\n기상: 06:30\n스크린타임: 02:30"), null), 0.0)
         // note value wins over the live count; live count used when the note has none
@@ -22,12 +22,14 @@ class ScoreTest {
     }
 
     @Test
-    fun todosScoreHalfEachUpToThree() {
-        assertEquals(1.0, Score.of(note("", "- [x] a\n- [x] b\n- [ ] \n"), null), 0.0)
-        assertEquals(1.5, Score.of(note("", "- [x] a\n- [x] b\n- [x] c\n- [x] d\n"), null), 0.0)
+    fun big3ScoreHalfEachUpToThree() {
+        // only Big3 (🔺) count; plain todos don't
+        assertEquals(1.0, Score.of(note("", "- [x] a 🔺\n- [x] b 🔺\n- [x] plain\n- [ ] \n"), null), 0.0)
+        assertEquals(1.5, Score.of(note("", "- [x] a 🔺\n- [x] b 🔺\n- [x] c 🔺\n- [x] d 🔺\n"), null), 0.0)
         // checkboxes outside ### Todo don't count
-        assertEquals(0.0, Score.of("---\n---\n### Journal\n- [x] a\n", null), 0.0)
-        assertEquals("---\n수면:\n평가: 0.5\n---\n### Todo\n- [x] a ✅ 2026-10-15",
-            Score.apply(Todos.set("---\n---\n### Todo\n- [ ] a", 0, Goal(true, "a", java.time.LocalDate.of(2026, 10, 15))), null))
+        assertEquals(0.0, Score.of("---\n---\n### Journal\n- [x] a 🔺\n", null), 0.0)
+        assertEquals("---\n수면:\n평가: 0.5\n---\n### Todo\n- [x] a 🔺 ✅ 2026-10-15",
+            Score.apply(Todos.set("---\n---\n### Todo\n- [ ] a 🔺", 0,
+                Goal(true, "a", java.time.LocalDate.of(2026, 10, 15), big = true)), null))
     }
 }

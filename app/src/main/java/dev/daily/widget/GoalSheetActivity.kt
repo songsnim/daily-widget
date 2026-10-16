@@ -5,6 +5,8 @@ import android.graphics.Paint
 import android.os.Bundle
 import android.text.InputType
 import android.view.Gravity
+import android.view.MotionEvent
+import android.view.View
 import android.view.ViewGroup.LayoutParams.MATCH_PARENT
 import android.view.ViewGroup.LayoutParams.WRAP_CONTENT
 import android.view.WindowInsets
@@ -15,6 +17,7 @@ import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
+import android.widget.Toast
 import dev.daily.widget.Ui.dp
 import dev.daily.widget.Ui.round
 import dev.daily.widget.Ui.text
@@ -100,7 +103,9 @@ class GoalSheetActivity : Activity() {
                 if (action != EditorInfo.IME_ACTION_DONE) return@setOnEditorActionListener false
                 val goal = v.text.toString().trim()
                 if (goal.isNotEmpty()) {
-                    edit { checklist.add(it, goal) }
+                    // Todos fill the Big3 first; star or unstar them in the list.
+                    val big = day != null && goals().count { it.big && it.text.isNotEmpty() } < Score.TODOS
+                    edit { checklist.add(it, goal, big) }
                     v.text = ""
                     render()
                 }
@@ -131,7 +136,7 @@ class GoalSheetActivity : Activity() {
         ?: Vault.read(note)?.let(checklist::parse).orEmpty()
 
     private fun render() {
-        name.text = day?.let { "${Store.dayLabel(it)} · 1개당 평가 0.5점" } ?: period?.name(date) ?: "기한 없는 할 일"
+        name.text = day?.let { "${Store.dayLabel(it)} · ★ Big3 1개당 평가 0.5점" } ?: period?.name(date) ?: "기한 없는 할 일"
         period?.let {
             badge.text = it.relative(offset)
             badge.setTextColor(if (offset == 0L) Ui.BLUE else Ui.TEXT)
@@ -139,23 +144,60 @@ class GoalSheetActivity : Activity() {
         clearing = true
         list.removeAllViews() // a focused field loses focus here and commits its text first
         clearing = false
-        goals().forEachIndexed { i, goal ->
-            if (goal.text.isEmpty()) return@forEachIndexed // the template's blank "- [ ] " line
-            if (day == null && period == null && goal.checked) return@forEachIndexed // finished backlog items stay in the file only
-            list.addView(row(i, goal))
+        val shown = goals().withIndex()
+            .filter { it.value.text.isNotEmpty() } // the template's blank "- [ ] " line
+            .filter { day != null || period != null || !it.value.checked } // finished backlog items stay in the file only
+        (if (day != null) shown.bigFirst() else shown).forEach { (i, goal) -> list.addView(row(i, goal).apply { tag = i }) }
+    }
+
+    // Drag by the handle: the row follows the finger and neighbours swap past it; on release the new order is written.
+    // The dragged row itself never leaves the list (that would cancel the touch), its neighbours move around it.
+    private fun handle(row: View) = text("≡", 20f, Ui.SUB).apply {
+        gravity = Gravity.CENTER
+        var startY = 0f
+        setOnTouchListener { _, e ->
+            when (e.actionMasked) {
+                MotionEvent.ACTION_DOWN -> {
+                    currentFocus?.clearFocus()
+                    if (row.parent != list) return@setOnTouchListener false // a cleared edit re-rendered the list
+                    list.parent.requestDisallowInterceptTouchEvent(true)
+                    startY = e.rawY
+                    row.background = round(Ui.SURFACE, 12)
+                    row.elevation = dp(6).toFloat()
+                }
+                MotionEvent.ACTION_MOVE -> {
+                    row.translationY = e.rawY - startY
+                    val at = list.indexOfChild(row)
+                    val below = list.getChildAt(at + 1)
+                    val above = if (at > 0) list.getChildAt(at - 1) else null
+                    if (below != null && row.translationY > below.height / 2f) {
+                        list.removeView(below); list.addView(below, at)
+                        startY += below.height
+                    } else if (above != null && row.translationY < -above.height / 2f) {
+                        list.removeView(above); list.addView(above, at)
+                        startY -= above.height
+                    }
+                    row.translationY = e.rawY - startY
+                }
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                    val order = (0 until list.childCount).map { list.getChildAt(it).tag as Int }
+                    if (order != order.sorted()) edit { checklist.reorder(it, order) }
+                    render()
+                }
+            }
+            true
         }
-        // The widget shows three todos and scores three; a fourth would only hide.
-        val full = day != null && goals().count { it.text.isNotEmpty() } >= Score.TODOS
-        add.isEnabled = !full
-        add.hint = if (full) "오늘 할 일은 ${Score.TODOS}개까지" else if (period == null) "할 일 추가" else "목표 추가"
     }
 
     private fun row(i: Int, goal: Goal): LinearLayout {
         var current = goal
         val box = TextView(this)
         val field = input("").apply { setText(goal.text) }
+        val star = text("★", 18f).apply { gravity = Gravity.CENTER }
         fun paint() {
-            box.background = round(if (current.checked) Ui.BLUE else 0xFF4E4E57.toInt(), 6)
+            // Todos: Big3 square, the rest round, as on the widget.
+            box.background = round(if (current.checked) Ui.BLUE else 0xFF4E4E57.toInt(), if (day != null && !current.big) 10 else 6)
+            star.setTextColor(if (current.big) Ui.BLUE else 0xFF4E4E57.toInt())
             field.setTextColor(if (current.checked) Ui.SUB else Ui.TEXT)
             field.paintFlags = if (current.checked) field.paintFlags or Paint.STRIKE_THRU_TEXT_FLAG
                 else field.paintFlags and Paint.STRIKE_THRU_TEXT_FLAG.inv()
@@ -176,6 +218,16 @@ class GoalSheetActivity : Activity() {
             current = current.check(!current.checked)
             paint()
             edit { checklist.set(it, i, current) }
+            if (day != null) render() // a finished Big3 drops out of the pinned top
+        }
+        star.setOnClickListener {
+            if (!current.big && goals().count { it.big && it.text.isNotEmpty() } >= Score.TODOS) {
+                Toast.makeText(this, "Big3는 ${Score.TODOS}개까지", Toast.LENGTH_SHORT).show()
+                return@setOnClickListener
+            }
+            current = current.copy(big = !current.big)
+            edit { checklist.set(it, i, current) }
+            render()
         }
         field.setOnEditorActionListener { v, action, _ ->
             if (action == EditorInfo.IME_ACTION_DONE) { commitText(); v.clearFocus() }
@@ -192,12 +244,14 @@ class GoalSheetActivity : Activity() {
         return LinearLayout(this).apply {
             gravity = Gravity.CENTER_VERTICAL
             minimumHeight = dp(52)
+            addView(handle(this), LinearLayout.LayoutParams(dp(32), dp(52)))
             // Wide hit area around the 20dp box.
             addView(FrameLayout(context).apply {
                 setOnClickListener { box.performClick() }
                 addView(box, FrameLayout.LayoutParams(dp(20), dp(20), Gravity.CENTER))
-            }, LinearLayout.LayoutParams(dp(44), dp(52)))
+            }, LinearLayout.LayoutParams(dp(40), dp(52)))
             addView(field, LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f))
+            if (day != null) addView(star, LinearLayout.LayoutParams(dp(40), dp(52)))
             addView(delete, LinearLayout.LayoutParams(dp(44), dp(52)))
         }
     }

@@ -406,30 +406,30 @@ private fun Label(p: Period) {
         style = TextStyle(color = SUB, fontSize = 12.s))
 }
 
-// The day's todos, at most three; checked ones stay, struck through, so progress shows. Each is 0.5 평가.
+// The day's next three undone todos, unfinished Big3 first. Done ones leave the widget (the sheet keeps them),
+// letting the next todo up. Big3 (0.5 평가 each) get a square box, other todos a circle.
 @Composable
 private fun TodayList(ctx: Context, s: State, box: ColorProvider, surface: ColorProvider, modifier: GlanceModifier) {
     val open = listSheet(ctx, GoalSheetActivity.TODAY, day = s.day)
     val add = listSheet(ctx, GoalSheetActivity.TODAY, focusAdd = true, day = s.day)
-    val shown = s.todos.withIndex().filter { it.value.text.isNotEmpty() }.take(Score.TODOS)
+    val real = s.todos.withIndex().filter { it.value.text.isNotEmpty() }
+    val shown = real.filter { !it.value.checked }.bigFirst().take(Score.TODOS)
     Bordered(surface, modifier) {
         Column(GlanceModifier.fillMaxSize().padding(vertical = 1.d)) {
             if (shown.isEmpty()) {
-                Row(GlanceModifier.fillMaxSize().clickable(add), verticalAlignment = Alignment.CenterVertically) {
-                    Text("오늘 할 일을 정해 보세요", maxLines = 1, modifier = GlanceModifier.padding(start = 12.d),
-                        style = TextStyle(color = FAINT, fontSize = 13.s))
+                Row(GlanceModifier.fillMaxSize().clickable(if (real.isEmpty()) add else open), verticalAlignment = Alignment.CenterVertically) {
+                    Text(if (real.isEmpty()) "오늘 할 일을 정해 보세요" else "오늘 할 일 모두 완료", maxLines = 1,
+                        modifier = GlanceModifier.padding(start = 12.d), style = TextStyle(color = FAINT, fontSize = 13.s))
                 }
                 return@Column
             }
             shown.forEach { (i, item) ->
                 Row(GlanceModifier.fillMaxWidth().defaultWeight(), verticalAlignment = Alignment.CenterVertically) {
-                    CheckArea(34.d, 10.d, toggleItem(GoalSheetActivity.TODAY, i, !item.checked), null) {
-                        Box(GlanceModifier.size(16.d).background(if (item.checked) BLUE else box).cornerRadius(8.d)) {}
+                    CheckArea(34.d, 10.d, toggleItem(GoalSheetActivity.TODAY, i, true), null) {
+                        Box(GlanceModifier.size(16.d).background(box).cornerRadius(if (item.big) 4.d else 8.d)) {}
                     }
                     Text(item.text, maxLines = 1, modifier = GlanceModifier.defaultWeight().clickable(open), style = TextStyle(
-                        color = if (item.checked) SUB else TEXT, fontSize = 13.s,
-                        fontWeight = if (item.checked) FontWeight.Normal else FontWeight.Medium,
-                        textDecoration = if (item.checked) TextDecoration.LineThrough else TextDecoration.None))
+                        color = TEXT, fontSize = 13.s, fontWeight = if (item.big) FontWeight.Bold else FontWeight.Normal))
                 }
             }
             // Free rows keep their height and add a todo when tapped.
