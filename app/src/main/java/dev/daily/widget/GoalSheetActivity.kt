@@ -15,6 +15,7 @@ import android.view.inputmethod.InputMethodManager
 import android.widget.EditText
 import android.widget.FrameLayout
 import android.widget.LinearLayout
+import android.widget.PopupMenu
 import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
@@ -252,9 +253,29 @@ class GoalSheetActivity : Activity() {
             }, LinearLayout.LayoutParams(dp(40), dp(52)))
             addView(field, LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f))
             if (day != null) addView(star, LinearLayout.LayoutParams(dp(40), dp(52)))
+            if (day == null && period == null) addView(text("↑", 20f, Ui.SUB).apply {
+                gravity = Gravity.CENTER
+                // Commit a pending edit first, while index i still points at this item; an emptied one is gone instead.
+                setOnClickListener { v -> currentFocus?.clearFocus(); if (v.isAttachedToWindow) promote(v, i, current.text) }
+            }, LinearLayout.LayoutParams(dp(40), dp(52)))
             addView(delete, LinearLayout.LayoutParams(dp(44), dp(52)))
         }
     }
+
+    // Backlog only: moves item i to today's todos or this week's / month's / year's goals.
+    private fun promote(anchor: View, i: Int, goal: String) = PopupMenu(this, anchor).apply {
+        menu.add("오늘 할 일")
+        Period.entries.forEach { menu.add(it.title) }
+        setOnMenuItemClickListener { item ->
+            val p = Period.entries.firstOrNull { it.title == item.title }
+            if (p == null) Store.editTodos(this@GoalSheetActivity, Store.state.value?.today ?: LocalDate.now()) { Todos.add(it, goal) }
+            else Store.editGoals(this@GoalSheetActivity, p, { Goals.add(it, goal) })
+            Store.editBacklog(this@GoalSheetActivity) { Backlog.set(it, i, null) }
+            Toast.makeText(this@GoalSheetActivity, "${item.title}(으)로 옮겼어요", Toast.LENGTH_SHORT).show()
+            render()
+            true
+        }
+    }.show()
 
     private fun input(hint: String) = EditText(this).apply {
         this.hint = hint
