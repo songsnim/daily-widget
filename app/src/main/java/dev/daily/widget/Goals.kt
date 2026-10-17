@@ -118,5 +118,29 @@ object Goals : Checklist("Goal", under("Goal"))
 // The "### Todo" section of a daily note: up to three Big3 (scored, pinned on top) and any number of others.
 object Todos : Checklist("Todo", under("Todo"))
 
+// The "### Journal" section of a daily note as free text; set() swaps the section body and leaves the rest alone.
+object Journal {
+    private val section = under("Journal")
+
+    fun get(text: String?): String {
+        val lines = text?.lines() ?: return ""
+        return section(lines)?.joinToString("\n") { lines[it] }?.trim().orEmpty()
+    }
+
+    fun set(text: String, body: String): String {
+        val lines = text.lines().toMutableList()
+        val block = (if (body.isBlank()) emptyList() else body.trim().lines()) + ""
+        val r = section(lines)
+        if (r == null) {
+            if (lines.last().isNotEmpty()) lines.add("")
+            lines.addAll(listOf("### Journal") + block)
+        } else {
+            repeat(r.count()) { lines.removeAt(r.first) }
+            lines.addAll(r.first, block)
+        }
+        return lines.joinToString("\n")
+    }
+}
+
 // Area/Backlog.md: the whole file is the list.
 object Backlog : Checklist("", { lines -> lines.indices })

@@ -279,12 +279,22 @@ private fun Scaled(s: State, flash: String?, xp: Int) {
         Spacer(GlanceModifier.height(4.d))
         Row(GlanceModifier.fillMaxWidth().height(103.d)) {
             // Three equal rows: habits down the left (40dp, as narrow as two 15sp letters allow), today's todos
-            // over two rows, the backlog line and day arrows on the third. Every checkbox centre sits at x=68dp.
+            // over two rows beside the journal button, the backlog line and day arrows on the third. Every checkbox
+            // centre sits at x=68dp.
             Column(GlanceModifier.width(40.d).fillMaxHeight()) { Habits(ctx, s, surface) }
             Spacer(GlanceModifier.width(4.d))
             val row = (95f / 3 * LocalGeo.current.s).dp
             Column(GlanceModifier.defaultWeight().fillMaxHeight()) {
-                TodayList(ctx, s, box, surface, GlanceModifier.fillMaxWidth().height(row * 2 + 4.d))
+                Row(GlanceModifier.fillMaxWidth().height(row * 2 + 4.d)) {
+                    TodayList(ctx, s, box, surface, GlanceModifier.defaultWeight().fillMaxHeight())
+                    Spacer(GlanceModifier.width(4.d))
+                    // Blue once the day has a journal entry.
+                    val written = Journal.get(s.note(Vault.daily(s.day))).isNotEmpty()
+                    Bordered(surface, GlanceModifier.width(38.d).fillMaxHeight(),
+                        open(ctx, JournalSheetActivity::class.java, JournalSheetActivity.DATE, s.day.toString(), s.day)) {
+                        Text("✎", style = TextStyle(color = if (written) BLUE else SUB, fontSize = 16.s, fontWeight = FontWeight.Bold))
+                    }
+                }
                 Spacer(GlanceModifier.height(4.d))
                 Row(GlanceModifier.fillMaxWidth().height(row)) {
                     BacklogRow(ctx, s.backlog, box, surface, GlanceModifier.defaultWeight())

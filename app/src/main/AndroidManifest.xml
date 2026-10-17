@@ -66,6 +66,15 @@
             android:theme="@style/Sheet" />
 
         <activity
+            android:name=".JournalSheetActivity"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:noHistory="true"
+            android:taskAffinity=""
+            android:windowSoftInputMode="adjustResize"
+            android:theme="@style/Sheet" />
+
+        <activity
             android:name=".FxActivity"
             android:exported="false"
             android:excludeFromRecents="true"

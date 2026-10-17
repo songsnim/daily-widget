@@ -69,6 +69,17 @@ class GoalsTest {
     }
 
     @Test
+    fun journalSwapsOnlyItsSection() {
+        val note = "---\n---\n### Todo\n- [ ] a\n\n### Journal\n\n\n"
+        assertEquals("", Journal.get(note))
+        val t = Journal.set(note, "맑음\n산책")
+        assertEquals("---\n---\n### Todo\n- [ ] a\n\n### Journal\n맑음\n산책\n", t)
+        assertEquals("맑음\n산책", Journal.get(t))
+        assertEquals("### Journal\nb\n\n### Next", Journal.set("### Journal\na\n### Next", "b"))
+        assertEquals("x\n\n### Journal\nb\n", Journal.set("x", "b"))
+    }
+
+    @Test
     fun browsingPeriodsShiftsAndLabels() {
         val d = LocalDate.of(2026, 10, 6)
         assertEquals("2026 Week 38", Period.WEEK.name(Period.WEEK.shift(d, -3)))
