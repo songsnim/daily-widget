@@ -263,13 +263,17 @@ class GoalSheetActivity : Activity() {
         }
     }
 
-    // Backlog only: moves item i to today's todos or this week's / month's / year's goals.
+    // Backlog only: moves item i to today's or tomorrow's todos (tomorrow's note is made from the template if
+    // missing) or this week's / month's / year's goals.
     private fun promote(anchor: View, i: Int, goal: String) = PopupMenu(this, anchor).apply {
         menu.add("오늘 할 일")
+        menu.add("내일 할 일")
         Period.entries.forEach { menu.add(it.title) }
         setOnMenuItemClickListener { item ->
             val p = Period.entries.firstOrNull { it.title == item.title }
-            if (p == null) Store.editTodos(this@GoalSheetActivity, Store.state.value?.today ?: LocalDate.now()) { Todos.add(it, goal) }
+            val today = Store.state.value?.today ?: LocalDate.now()
+            if (p == null) Store.editTodos(this@GoalSheetActivity,
+                if (item.title == "내일 할 일") today.plusDays(1) else today) { Todos.add(it, goal) }
             else Store.editGoals(this@GoalSheetActivity, p, { Goals.add(it, goal) })
             Store.editBacklog(this@GoalSheetActivity) { Backlog.set(it, i, null) }
             Toast.makeText(this@GoalSheetActivity, "${item.title}(으)로 옮겼어요", Toast.LENGTH_SHORT).show()
