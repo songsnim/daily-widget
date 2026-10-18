@@ -71,6 +71,15 @@ open class Checklist(private val heading: String, private val section: (List<Str
     private fun line(goal: Goal) = goal.text + (if (goal.big) " 🔺" else "") +
         (if (goal.checked && goal.done != null) " ✅ ${goal.done}" else "")
 
+    // Marks items "- [>]" (moved to another day). That status isn't an item any more, so the widget and 평가
+    // skip the line while the note keeps it as a record.
+    fun defer(text: String, which: List<Int>): String {
+        val lines = text.lines().toMutableList()
+        val items = items(lines)
+        which.mapNotNull { items.getOrNull(it) }.forEach { lines[it] = ITEM.find(lines[it])!!.groupValues.let { g -> "${g[1]}>] ${g[3]}" } }
+        return lines.joinToString("\n")
+    }
+
     // Puts the items `order` names (item indices) into the lines those same items occupy, in that order;
     // every other line, hidden items included, stays where it is.
     fun reorder(text: String, order: List<Int>): String {

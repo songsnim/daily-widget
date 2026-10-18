@@ -69,6 +69,13 @@ class GoalsTest {
     }
 
     @Test
+    fun deferKeepsTheLineButDropsTheItem() {
+        val t = Todos.defer("### Todo\n- [ ] a 🔺\n- [x] b\n- [ ] c", listOf(0, 2))
+        assertEquals("### Todo\n- [>] a 🔺\n- [x] b\n- [>] c", t)
+        assertEquals(listOf(Goal(true, "b")), Todos.parse(t))
+    }
+
+    @Test
     fun journalSwapsOnlyItsSection() {
         val note = "---\n---\n### Todo\n- [ ] a\n\n### Journal\n\n\n"
         assertEquals("", Journal.get(note))
