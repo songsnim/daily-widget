@@ -371,27 +371,26 @@ private fun GoalRow(ctx: Context, k: Int, p: Period, goals: List<Goal>?, today: 
     val sheet = listSheet(ctx, p.name)
     // Same split as the backlog: box toggles, text edits. The label opens the note itself once it exists.
     val label = if (goals != null) actionStartActivity(obsidian("${p.folder}/${p.name(today)}")) else sheet
-    val i = goals?.indexOfFirst { it.text.isNotEmpty() } ?: -1
+    // The top unfinished goal; finished ones leave the widget, like today's todos.
+    val i = goals?.indexOfFirst { it.text.isNotEmpty() && !it.checked } ?: -1
     val goal = goals?.getOrNull(i)
+    val real = goals.orEmpty().filter { it.text.isNotEmpty() }
     Row(modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
         Row(GlanceModifier.fillMaxHeight().clickable(label), verticalAlignment = Alignment.CenterVertically) { Label(p) }
         if (goal == null) {
             Row(GlanceModifier.fillMaxSize().clickable(sheet), verticalAlignment = Alignment.CenterVertically) {
-                Text("목표를 추가해 보세요", maxLines = 1, style = TextStyle(color = FAINT, fontSize = 12.s))
+                Text(if (real.isEmpty()) "목표를 추가해 보세요" else "모두 완료 ${real.size}/${real.size}", maxLines = 1,
+                    style = TextStyle(color = FAINT, fontSize = 12.s))
             }
             return@Row
         }
         val geo = LocalGeo.current
         // Box pushed in 9dp so its centre lines up with the todo and backlog circles below (x=68dp).
-        CheckArea(37.d, 9.d, if (goal.checked) toggleItem(p.name, i, false) else null,
-            if (goal.checked) null else fx(ctx, geo, geo.goal(k), FxActivity.GOAL, p.name, i)) {
-            Box(GlanceModifier.size(18.d).background(if (goal.checked) BLUE else box).cornerRadius(5.d)) {}
+        CheckArea(37.d, 9.d, null, fx(ctx, geo, geo.goal(k), FxActivity.GOAL, p.name, i)) {
+            Box(GlanceModifier.size(18.d).background(box).cornerRadius(5.d)) {}
         }
-        val real = goals.filter { it.text.isNotEmpty() }
         Row(GlanceModifier.defaultWeight().fillMaxHeight().clickable(sheet), verticalAlignment = Alignment.CenterVertically) {
-            Text(goal.text, maxLines = 1, modifier = GlanceModifier.defaultWeight(), style = TextStyle(
-                color = if (goal.checked) SUB else TEXT, fontSize = 12.s,
-                textDecoration = if (goal.checked) TextDecoration.LineThrough else TextDecoration.None))
+            Text(goal.text, maxLines = 1, modifier = GlanceModifier.defaultWeight(), style = TextStyle(color = TEXT, fontSize = 12.s))
             Text("${real.count { it.checked }}/${real.size}", maxLines = 1,
                 modifier = GlanceModifier.padding(start = 8.d, end = 8.d),
                 style = TextStyle(color = SUB, fontSize = 12.s))
