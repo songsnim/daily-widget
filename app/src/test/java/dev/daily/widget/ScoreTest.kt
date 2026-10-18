@@ -12,8 +12,11 @@ class ScoreTest {
         assertEquals(4.5, Score.of(note(habits), null), 0.0)
         // 6 points of parts, capped at 5; an old manual 보너스 no longer counts
         assertEquals(5.0, Score.of(note("$habits\n보너스: true", "- [x] a 🔺\n- [x] b 🔺\n- [ ] c 🔺\n"), null), 0.0)
-        // 6h59m sleep, 2h30m screen
-        assertEquals(0.5, Score.of(note("취침: 23:31\n기상: 06:30\n스크린타임: 02:30"), null), 0.0)
+        // 6h59m sleep (0) but up by 8 (0.5), 2h30m screen (0.5)
+        assertEquals(1.0, Score.of(note("취침: 23:31\n기상: 06:30\n스크린타임: 02:30"), null), 0.0)
+        // 8:00 still counts, 8:01 doesn't; 8h sleep either way
+        assertEquals(1.0, Score.of(note("취침: 00:00\n기상: 08:00"), null), 0.0)
+        assertEquals(0.5, Score.of(note("취침: 00:01\n기상: 08:01"), null), 0.0)
         // note value wins over the live count; live count used when the note has none
         assertEquals(0.0, Score.of(note("스크린타임: 03:01"), 10), 0.0)
         assertEquals(1.0, Score.of(null, 120), 0.0)

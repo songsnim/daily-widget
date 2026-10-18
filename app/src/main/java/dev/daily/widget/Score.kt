@@ -16,12 +16,15 @@ object Score {
             Part(key, if (it) "완료" else "아직", if (it) max else 0.0, max)
         }
         val slept = sleep(props)
+        val wake = minutes(props["기상"])
         val used = minutes(props["스크린타임"])?.toLong() ?: screen
         val done = minOf(TODOS, Todos.parse(note.orEmpty()).count { it.big && it.checked && it.text.isNotEmpty() })
         return listOf(
             habit("독서", 0.5), habit("운동", 1.0), habit("금주", 1.0),
-            Part("수면", slept?.let { "${duration(it)} · 7시간 이상이면 1점" } ?: "기상·취침 기록 없음",
-                if ((slept ?: 0) >= 7 * 60) 1.0 else 0.0, 1.0),
+            Part("기상", wake?.let { "${Frontmatter.time(props["기상"])} · 8시까지 일어나면 0.5점" } ?: "기록 없음",
+                if (wake != null && wake <= 8 * 60) 0.5 else 0.0, 0.5),
+            Part("수면", slept?.let { "${duration(it)} · 7시간 이상이면 0.5점" } ?: "기상·취침 기록 없음",
+                if ((slept ?: 0) >= 7 * 60) 0.5 else 0.0, 0.5),
             Part("스크린", used?.let { "${duration(it.toInt())} · 2시간 이하 1점, 3시간 이하 0.5점" } ?: "기록 없음",
                 if (used == null) 0.0 else if (used <= 120) 1.0 else if (used <= 180) 0.5 else 0.0, 1.0),
             Part("Big3", "$done/$TODOS 완료 · 1개당 0.5점", done * 0.5, TODOS * 0.5),
