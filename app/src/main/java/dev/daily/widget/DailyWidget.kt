@@ -334,10 +334,12 @@ private fun RowScope.Values(ctx: Context, s: State, flash: String?, surface: Col
     // Browsing another day: "now" means nothing there, so always the sheet, and the first caption names the day.
     val browsing = s.day != s.today
     val sheetDate = if (browsing) s.day else null
-    // 수면 = last night's 취침 to this morning's 기상; fills in the moment 기상 is recorded. Browsing names the day here.
-    val sleep = Score.sleep(props)
-    Cell("수면", sleep?.let { "${it / 60}:%02d".format(it % 60) } ?: "—",
-        if (sleep != null) Tone.VALUE else Tone.EMPTY, null, surface, GlanceModifier.defaultWeight())
+    // Night in order: 취침, then 기상 (browsing names the day on its caption), then 수면 between the two.
+    val bed = s.bed
+    Cell("취침", bed ?: "기록", if (bed != null) Tone.VALUE else Tone.CTA,
+        if (bed == null && !browsing) null else open(ctx, SheetActivity::class.java, SheetActivity.KEY, "취침", sheetDate),
+        surface, GlanceModifier.defaultWeight(),
+        hit = if (bed == null && !browsing) fx(ctx, geo, geo.value(0), FxActivity.BED) else null)
     Spacer(GlanceModifier.width(4.d))
     val wake = Frontmatter.time(props["기상"])
     Cell(if (browsing) "${s.day.monthValue}/${s.day.dayOfMonth} 기상" else "오늘 기상", wake ?: "기록",
@@ -346,11 +348,10 @@ private fun RowScope.Values(ctx: Context, s: State, flash: String?, surface: Col
         surface, GlanceModifier.defaultWeight(), captionColor = if (browsing) BLUE else SUB,
         hit = if (wake == null && !browsing) fx(ctx, geo, geo.value(1), FxActivity.WAKE) else null)
     Spacer(GlanceModifier.width(4.d))
-    val bed = s.bed
-    Cell("취침", bed ?: "기록", if (bed != null) Tone.VALUE else Tone.CTA,
-        if (bed == null && !browsing) null else open(ctx, SheetActivity::class.java, SheetActivity.KEY, "취침", sheetDate),
-        surface, GlanceModifier.defaultWeight(),
-        hit = if (bed == null && !browsing) fx(ctx, geo, geo.value(2), FxActivity.BED) else null)
+    // 수면 = last night's 취침 to this morning's 기상; fills in the moment 기상 is recorded.
+    val sleep = Score.sleep(props)
+    Cell("수면", sleep?.let { "${it / 60}:%02d".format(it % 60) } ?: "—",
+        if (sleep != null) Tone.VALUE else Tone.EMPTY, null, surface, GlanceModifier.defaultWeight())
     Spacer(GlanceModifier.width(4.d))
     // Opens Digital Wellbeing's dashboard; the note is the fallback where it isn't installed.
     val wellbeing = ctx.packageManager.getLaunchIntentForPackage(ScreenTime.WELLBEING) ?: obsidian("${Vault.DAYS}/${Vault.name(s.day)}")
