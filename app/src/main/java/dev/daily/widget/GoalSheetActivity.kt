@@ -97,14 +97,14 @@ class GoalSheetActivity : Activity() {
         }, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply { bottomMargin = dp(16) })
         list = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         sheet.addView(ScrollView(this).apply { addView(list) })
-        deferAll = text("남은 일 모두 내일로 →", 15f, Ui.BLUE, bold = true).apply {
+        deferAll = text("남은 ${if (day != null) "일" else "목표"} 모두 ${next}로 →", 15f, Ui.BLUE, bold = true).apply {
             gravity = Gravity.CENTER
             setOnClickListener {
                 currentFocus?.clearFocus()
                 defer(goals().withIndex().filter { !it.value.checked && it.value.text.isNotEmpty() }.map { it.index })
             }
         }
-        if (day != null) sheet.addView(deferAll, LinearLayout.LayoutParams(MATCH_PARENT, dp(44)))
+        if (deferrable) sheet.addView(deferAll, LinearLayout.LayoutParams(MATCH_PARENT, dp(44)))
         add = input(if (period == null) "할 일 추가" else "목표 추가").apply {
             background = round(Ui.SURFACE, 14)
             setPadding(dp(16), dp(14), dp(16), dp(14))
@@ -161,16 +161,28 @@ class GoalSheetActivity : Activity() {
         deferAll.visibility = if (shown.any { !it.value.checked }) View.VISIBLE else View.GONE
     }
 
-    // Todos only: undone items i go to the next day's note (made from the template if missing) as plain todos,
-    // and stay here as "- [>]".
+    // Todos, weekly and monthly goals can be put off; a year's goals can't.
+    private val deferrable get() = day != null || period == Period.WEEK || period == Period.MONTH
+    private val next get() = if (day != null) "내일" else if (period == Period.WEEK) "다음 주" else "다음 달"
+
+    // Undone items i go to the next day's / week's / month's note (made from the template if missing) as plain
+    // items, and stay here as "- [>]".
     private fun defer(which: List<Int>) {
-        val d = day ?: return
         val items = goals()
         val texts = which.mapNotNull { items.getOrNull(it)?.text }
         if (texts.isEmpty()) return
-        Store.editTodos(this, d.plusDays(1)) { texts.fold(it) { t, g -> Todos.add(t, g) } }
-        Store.editTodos(this, d) { Todos.defer(it, which) }
-        Toast.makeText(this, "${Store.dayLabel(d.plusDays(1))}로 미뤘어요", Toast.LENGTH_SHORT).show()
+        val addAll = { text: String -> texts.fold(text) { t, g -> checklist.add(t, g) } }
+        val to = day?.let { d ->
+            Store.editTodos(this, d.plusDays(1), addAll)
+            Store.editTodos(this, d) { Todos.defer(it, which) }
+            Store.dayLabel(d.plusDays(1))
+        } ?: period!!.let { p ->
+            val from = date
+            Store.editGoals(this, p, addAll, p.shift(from, 1))
+            Store.editGoals(this, p, { Goals.defer(it, which) }, from)
+            "$next(${p.name(p.shift(from, 1))})"
+        }
+        Toast.makeText(this, "${to}로 미뤘어요", Toast.LENGTH_SHORT).show()
         render()
     }
 
@@ -276,8 +288,8 @@ class GoalSheetActivity : Activity() {
                 addView(box, FrameLayout.LayoutParams(dp(20), dp(20), Gravity.CENTER))
             }, LinearLayout.LayoutParams(dp(40), dp(52)))
             addView(field, LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f))
-            // Undone todos can go to tomorrow; done ones keep the slot so the stars line up.
-            if (day != null) addView(text(if (current.checked) "" else "→", 20f, Ui.SUB).apply {
+            // Undone items can be put off; done ones keep the slot so the columns line up.
+            if (deferrable) addView(text(if (current.checked) "" else "→", 20f, Ui.SUB).apply {
                 gravity = Gravity.CENTER
                 if (!current.checked) setOnClickListener { v -> currentFocus?.clearFocus(); if (v.isAttachedToWindow) defer(listOf(i)) }
             }, LinearLayout.LayoutParams(dp(36), dp(52)))
