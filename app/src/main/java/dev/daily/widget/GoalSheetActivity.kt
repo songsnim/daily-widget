@@ -288,39 +288,44 @@ class GoalSheetActivity : Activity() {
                 addView(box, FrameLayout.LayoutParams(dp(20), dp(20), Gravity.CENTER))
             }, LinearLayout.LayoutParams(dp(40), dp(52)))
             addView(field, LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f))
-            // Undone items can be put off; done ones keep the slot so the columns line up.
-            if (deferrable) addView(text(if (current.checked) "" else "→", 20f, Ui.SUB).apply {
-                gravity = Gravity.CENTER
-                if (!current.checked) setOnClickListener { v -> currentFocus?.clearFocus(); if (v.isAttachedToWindow) defer(listOf(i)) }
-            }, LinearLayout.LayoutParams(dp(36), dp(52)))
-            if (day != null) addView(star, LinearLayout.LayoutParams(dp(36), dp(52)))
-            if (day == null && period == null) addView(text("↑", 20f, Ui.SUB).apply {
+            // Undone items can move (↑ out of the backlog, → elsewhere); done ones keep the slot so the columns line up.
+            addView(text(if (current.checked) "" else if (day == null && period == null) "↑" else "→", 20f, Ui.SUB).apply {
                 gravity = Gravity.CENTER
                 // Commit a pending edit first, while index i still points at this item; an emptied one is gone instead.
-                setOnClickListener { v -> currentFocus?.clearFocus(); if (v.isAttachedToWindow) promote(v, i, current.text) }
-            }, LinearLayout.LayoutParams(dp(40), dp(52)))
-            addView(delete, LinearLayout.LayoutParams(dp(44), dp(52)))
+                if (!current.checked) setOnClickListener { v -> currentFocus?.clearFocus(); if (v.isAttachedToWindow) send(v, i, current.text) }
+            }, LinearLayout.LayoutParams(dp(30), dp(52)))
+            if (day != null) addView(star, LinearLayout.LayoutParams(dp(30), dp(52)))
+            addView(delete, LinearLayout.LayoutParams(dp(36), dp(52)))
         }
     }
 
-    // Backlog only: moves item i to today's or tomorrow's todos (tomorrow's note is made from the template if
-    // missing) or this week's / month's / year's goals.
-    private fun promote(anchor: View, i: Int, goal: String) = PopupMenu(this, anchor).apply {
-        menu.add("오늘 할 일")
-        menu.add("내일 할 일")
-        Period.entries.forEach { menu.add(it.title) }
-        setOnMenuItemClickListener { item ->
-            val p = Period.entries.firstOrNull { it.title == item.title }
-            val today = Store.state.value?.today ?: LocalDate.now()
-            if (p == null) Store.editTodos(this@GoalSheetActivity,
-                if (item.title == "내일 할 일") today.plusDays(1) else today) { Todos.add(it, goal) }
-            else Store.editGoals(this@GoalSheetActivity, p, { Goals.add(it, goal) })
-            Store.editBacklog(this@GoalSheetActivity) { Backlog.set(it, i, null) }
-            Toast.makeText(this@GoalSheetActivity, "${item.title}(으)로 옮겼어요", Toast.LENGTH_SHORT).show()
-            render()
-            true
-        }
-    }.show()
+    // Moves item i to another list: the next day / week / month (defer), today's or tomorrow's todos, the backlog,
+    // or this week's / month's / year's goals. Missing notes are made from their templates. A backlog item leaves
+    // the backlog; a todo or goal stays behind as "- [>]".
+    private fun send(anchor: View, i: Int, goal: String) {
+        val ctx = this
+        val today = Store.state.value?.today ?: LocalDate.now()
+        val targets = mutableListOf<Pair<String, () -> Unit>>()
+        if (deferrable) targets += (if (day != null) "내일 할 일" else next) to { defer(listOf(i)) }
+        if (day == null) targets += "오늘 할 일" to { Store.editTodos(ctx, today) { Todos.add(it, goal) } }
+        if (day == null && period == null) targets += "내일 할 일" to { Store.editTodos(ctx, today.plusDays(1)) { Todos.add(it, goal) } }
+        if (day != null || period != null) targets += "백로그" to { Store.editBacklog(ctx) { Backlog.add(it, goal) } }
+        Period.entries.filter { it != period }.forEach { p -> targets += p.title to { Store.editGoals(ctx, p, { Goals.add(it, goal) }) } }
+        PopupMenu(this, anchor).apply {
+            targets.forEachIndexed { k, (label, _) -> menu.add(0, k, k, label) }
+            setOnMenuItemClickListener { item ->
+                val (label, write) = targets[item.itemId]
+                write()
+                if (deferrable && item.itemId == 0) return@setOnMenuItemClickListener true // defer() did the rest
+                day?.let { d -> Store.editTodos(ctx, d) { Todos.defer(it, listOf(i)) } }
+                    ?: period?.let { p -> Store.editGoals(ctx, p, { Goals.defer(it, listOf(i)) }, date) }
+                    ?: Store.editBacklog(ctx) { Backlog.set(it, i, null) }
+                Toast.makeText(ctx, "${label}(으)로 옮겼어요", Toast.LENGTH_SHORT).show()
+                render()
+                true
+            }
+        }.show()
+    }
 
     private fun input(hint: String) = EditText(this).apply {
         this.hint = hint
