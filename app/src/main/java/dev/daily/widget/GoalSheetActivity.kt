@@ -151,11 +151,13 @@ class GoalSheetActivity : Activity() {
         (if (day != null) shown.bigFirst() else shown).forEach { (i, goal) -> list.addView(row(i, goal).apply { tag = i }) }
     }
 
-    // Drag by the handle: the row follows the finger and neighbours swap past it; on release the new order is written.
-    // The dragged row itself never leaves the list (that would cancel the touch), its neighbours move around it.
+    // Drag by the handle: the row follows the finger and the rows it passes slide aside, all by translation only
+    // (adding or removing views mid-touch crashed the list's draw). On release the new order is written.
     private fun handle(row: View) = text("≡", 20f, Ui.SUB).apply {
         gravity = Gravity.CENTER
         var startY = 0f
+        var from = 0
+        var to = 0
         setOnTouchListener { _, e ->
             when (e.actionMasked) {
                 MotionEvent.ACTION_DOWN -> {
@@ -163,27 +165,26 @@ class GoalSheetActivity : Activity() {
                     if (row.parent != list) return@setOnTouchListener false // a cleared edit re-rendered the list
                     list.parent.requestDisallowInterceptTouchEvent(true)
                     startY = e.rawY
+                    from = list.indexOfChild(row)
+                    to = from
                     row.background = round(Ui.SURFACE, 12)
                     row.elevation = dp(6).toFloat()
                 }
                 MotionEvent.ACTION_MOVE -> {
-                    row.translationY = e.rawY - startY
-                    val at = list.indexOfChild(row)
-                    val below = list.getChildAt(at + 1)
-                    val above = if (at > 0) list.getChildAt(at - 1) else null
-                    if (below != null && row.translationY > below.height / 2f) {
-                        list.removeView(below); list.addView(below, at)
-                        startY += below.height
-                    } else if (above != null && row.translationY < -above.height / 2f) {
-                        list.removeView(above); list.addView(above, at)
-                        startY -= above.height
+                    val dy = e.rawY - startY
+                    row.translationY = dy
+                    to = (from + Math.round(dy / row.height)).coerceIn(0, list.childCount - 1)
+                    for (k in 0 until list.childCount) if (k != from) list.getChildAt(k).translationY = when {
+                        k in from + 1..to -> -row.height.toFloat()
+                        k in to until from -> row.height.toFloat()
+                        else -> 0f
                     }
-                    row.translationY = e.rawY - startY
                 }
                 MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
-                    val order = (0 until list.childCount).map { list.getChildAt(it).tag as Int }
-                    if (order != order.sorted()) edit { checklist.reorder(it, order) }
-                    render()
+                    val order = (0 until list.childCount).map { list.getChildAt(it).tag as Int }.toMutableList()
+                    order.add(to, order.removeAt(from))
+                    if (to != from) edit { checklist.reorder(it, order) }
+                    list.post { render() }
                 }
             }
             true
