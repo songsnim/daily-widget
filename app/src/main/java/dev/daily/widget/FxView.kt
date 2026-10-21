@@ -609,6 +609,14 @@ class FxView(ctx: Context) : View(ctx) {
     }
 
     // ---------- entry ----------
+    // Drops whatever is playing so the next play() starts on a clean stage.
+    fun reset() {
+        ps.clear(); es.clear(); t0 = 0L; onDone = null
+        showBar = false; landed = 0; pendingOrbs = 0; lastLand = 0L; bump = -1000L; orbN = 0; gainLabel = ""
+        visibility = VISIBLE
+        invalidate()
+    }
+
     fun play(s: Show, from: PointF, bar: RectF?, done: () -> Unit) {
         onDone = done
         widgetBar = bar

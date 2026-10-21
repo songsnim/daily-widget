@@ -4,9 +4,11 @@ import android.app.Activity
 import android.graphics.PointF
 import android.graphics.RectF
 import android.os.Bundle
+import android.view.MotionEvent
 import android.view.WindowManager
 import android.view.View
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.MainScope
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.cancel
@@ -17,7 +19,7 @@ import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
 
 // A widget tap that completes something: records it (same optimistic Store path as everything else),
-// then plays its reward over the home screen. Glance can't animate, so this transparent, untouchable
+// then plays its reward over the home screen. Glance can't animate, so this transparent
 // window does it and closes itself. Undo taps never come here; they stay quiet callbacks.
 class FxActivity : Activity() {
     companion object {
@@ -31,36 +33,58 @@ class FxActivity : Activity() {
         const val WAKE = "wake"
         const val BED = "bed"
         const val GOAL = "goal"
+        const val HABITS = "habits"
+        private val HABITS_KEYS = dev.daily.widget.HABITS
     }
 
     private val scope = MainScope()
+    private var job: Job? = null
+    private lateinit var view: FxView
+    // Widget space (dp) to screen (px): screen = origin + widget * k. Null when the launcher gave no bounds.
+    private var k = 0f
+    private var origin: PointF? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        window.addFlags(WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS)
+        // Touchable on purpose: Android 12+ drops touches that pass through another app's window, so a
+        // see-through overlay would swallow every widget tap until it closed. Instead a tap cuts the current
+        // reward short and, on an open habit cell, plays that one (see onTouch).
+        window.addFlags(WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS)
         window.setDecorFitsSystemWindows(false)
-        val view = FxView(this)
+        view = FxView(this)
+        view.setOnTouchListener { _, e -> if (e.action == MotionEvent.ACTION_DOWN) onTap(e.rawX, e.rawY); true }
         setContentView(view)
         val kind = intent.getStringExtra(KIND) ?: return finish()
-        val key = intent.getStringExtra(KEY).orEmpty()
-        val index = intent.getIntExtra(INDEX, -1)
-        scope.launch {
+        val cell = intent.getFloatArrayExtra(CELL)
+        val b = intent.sourceBounds
+        if (b != null && cell != null && cell[2] > 0f) {
+            // sourceBounds has the on-screen corner but the unscaled view width, hence One UI's shrink ratio.
+            k = b.width() / cell[2] * intent.getFloatExtra(RATIO, 1f)
+            origin = PointF(b.left - cell[0] * k, b.top - cell[1] * k)
+        }
+        // The launcher passes the tapped cell's screen rect; the screen centre is the fallback.
+        val from = b?.let { PointF(it.exactCenterX(), it.exactCenterY()) }
+            ?: PointF(resources.displayMetrics.widthPixels / 2f, resources.displayMetrics.heightPixels * .6f)
+        run(kind, intent.getStringExtra(KEY).orEmpty(), intent.getIntExtra(INDEX, -1), from, wait = true)
+    }
+
+    private fun run(kind: String, key: String, index: Int, from: PointF, wait: Boolean) {
+        job?.cancel()
+        view.reset()
+        job = scope.launch {
             if (Store.state.value == null) Store.refresh(applicationContext)
             val bar = widgetBar()
             // Keep the widget bar at the old total so the overlay can fill it in place.
             if (bar != null) Store.xpHold.value = Store.state.value?.xp
             val show = Store.state.value?.takeIf { it.problem == null }?.let { perform(kind, key, index) }
             if (show == null) { Store.releaseXp(applicationContext); finish(); return@launch }
-            // The launcher passes the tapped cell's screen rect; the screen centre is the fallback.
-            val from = intent.sourceBounds?.let { PointF(it.exactCenterX(), it.exactCenterY()) }
-                ?: PointF(resources.displayMetrics.widthPixels / 2f, resources.displayMetrics.heightPixels * .6f)
             // One UI's launcher slides widget launches up whatever we ask for, so draw nothing until the window
             // has settled; otherwise the bar rises from below and reads as a second bar.
-            withTimeoutOrNull(800) { entered.await() }
+            if (wait) withTimeoutOrNull(800) { entered.await() }
             view.play(show, from, bar) {
                 // The overlay's last frame stays up while the widget redraws at the new total, then both match.
                 Store.releaseXp(applicationContext)
-                scope.launch {
+                job = scope.launch {
                     delay(400)
                     view.visibility = View.INVISIBLE // empty before the exit animation, so nothing slides away
                     delay(50)
@@ -70,6 +94,20 @@ class FxActivity : Activity() {
         }
     }
 
+    // A tap on an open habit cell starts its reward now; anywhere else just closes the overlay.
+    private fun onTap(x: Float, y: Float) {
+        val o = origin
+        val cells = intent.getFloatArrayExtra(HABITS)
+        val props = Store.state.value?.props.orEmpty()
+        val hit = if (o == null || cells == null) null else HABITS_KEYS.indices.firstOrNull { i ->
+            val c = cells.copyOfRange(i * 4, i * 4 + 4)
+            props[HABITS_KEYS[i]] != "true" && RectF(o.x + c[0] * k, o.y + c[1] * k, o.x + (c[0] + c[2]) * k, o.y + (c[1] + c[3]) * k).contains(x, y)
+        }
+        if (hit == null) { Store.releaseXp(applicationContext); finish(); return }
+        val c = cells!!.copyOfRange(hit * 4, hit * 4 + 4)
+        run(HABIT, HABITS_KEYS[hit], -1, PointF(o!!.x + (c[0] + c[2] / 2) * k, o.y + (c[1] + c[3] / 2) * k), wait = false)
+    }
+
     private val entered = CompletableDeferred<Unit>()
 
     override fun onEnterAnimationComplete() {
@@ -77,18 +115,15 @@ class FxActivity : Activity() {
         entered.complete(Unit)
     }
 
-    // The launcher only tells us the tapped cell's screen rect; the widget's own XP bar is found by mapping
-    // its widget-space rect through that cell (scale from widths, origin from the cell's corner).
-    // sourceBounds has the on-screen corner but the unscaled view width, hence One UI's shrink ratio.
+    // The widget's own XP bar on screen, mapped through the tapped cell. Its right end is kept within the
+    // mirror of its left margin: a widget never reaches past the screen's opposite edge, and One UI's scaling
+    // can make the mapped width run long (the fill then spilled onto the home screen).
     private fun widgetBar(): RectF? {
-        val b = intent.sourceBounds ?: return null
-        val cell = intent.getFloatArrayExtra(CELL) ?: return null
+        val o = origin ?: return null
         val bar = intent.getFloatArrayExtra(BAR) ?: return null
-        if (cell[2] <= 0f) return null
-        val k = b.width() / cell[2] * intent.getFloatExtra(RATIO, 1f)
-        val x = b.left - cell[0] * k
-        val y = b.top - cell[1] * k
-        return RectF(x + bar[0] * k, y + bar[1] * k, x + (bar[0] + bar[2]) * k, y + (bar[1] + bar[3]) * k)
+        val left = o.x + bar[0] * k
+        val right = minOf(o.x + (bar[0] + bar[2]) * k, resources.displayMetrics.widthPixels - left)
+        return RectF(left, o.y + bar[1] * k, right, o.y + (bar[1] + bar[3]) * k)
     }
 
     override fun onDestroy() {

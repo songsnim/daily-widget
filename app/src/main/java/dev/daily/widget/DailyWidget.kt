@@ -65,7 +65,7 @@ import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
 
 private const val BED_CUTOFF_HOUR = 18
-private val HABITS = listOf("독서", "운동", "금주")
+val HABITS = listOf("독서", "운동", "금주")
 
 // 취침 belongs to the next day's note so the dashboard can compute 기상 - 취침 within one note.
 fun dateFor(key: String, now: LocalDateTime): LocalDate =
@@ -173,6 +173,7 @@ private fun fx(ctx: Context, geo: Geo, cell: FloatArray, kind: String, key: Stri
         .putExtra(FxActivity.CELL, cell)
         .putExtra(FxActivity.BAR, geo.bar)
         .putExtra(FxActivity.RATIO, geo.ratio)
+        .putExtra(FxActivity.HABITS, HABITS.indices.flatMap { geo.habit(it).asList() }.toFloatArray())
         .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
 
 // Tap target for fx intents, laid over the cell. Glance only makes immutable PendingIntents, and the launcher
