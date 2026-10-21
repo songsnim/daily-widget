@@ -5,7 +5,7 @@ package dev.daily.widget
 data class Rules(
     val points: Map<String, Double> = DEFAULT_POINTS,
     val wakeBy: Int = 8 * 60,
-    val sleepAtLeast: Int = 7 * 60,
+    val bedBy: Int = 22 * 60 + 45,
     val screenFull: Int = 2 * 60, // at most this: full points
     val screenHalf: Int = 3 * 60, // at most this: half points
 ) {
@@ -13,11 +13,11 @@ data class Rules(
 
     companion object {
         // Big3 is per completed item.
-        val DEFAULT_POINTS = mapOf("독서" to .5, "운동" to 1.0, "금주" to 1.0, "기상" to .5, "수면" to .5, "스크린" to 1.0, "Big3" to .5)
+        val DEFAULT_POINTS = mapOf("독서" to .5, "운동" to 1.0, "금주" to 1.0, "취침" to .5, "기상" to .5, "스크린" to 1.0, "Big3" to .5)
     }
 }
 
-// 평가 is computed, not picked: habits, sleep, screen time and today's Big3. By default the parts add up to 6
+// 평가 is computed, not picked: habits, bed and wake times, screen time and today's Big3. By default the parts add up to 6
 // but the score stops at 5, so one miss still allows a perfect day.
 object Score {
     const val MAX = 5.0
@@ -35,17 +35,17 @@ object Score {
         fun habit(key: String) = (props[key] == "true").let {
             Part(key, if (it) "완료" else "아직", if (it) r.pts(key) else 0.0, r.pts(key))
         }
-        val slept = sleep(props)
+        val bed = minutes(props["취침"])
         val wake = minutes(props["기상"])
         val used = minutes(props["스크린타임"])?.toLong() ?: screen
         val done = minOf(TODOS, Todos.parse(note.orEmpty()).count { it.big && it.checked && it.text.isNotEmpty() })
-        val wakePts = r.pts("기상"); val sleepPts = r.pts("수면"); val screenPts = r.pts("스크린"); val bigPts = r.pts("Big3")
+        val bedPts = r.pts("취침"); val wakePts = r.pts("기상"); val screenPts = r.pts("스크린"); val bigPts = r.pts("Big3")
         return listOf(
             habit("독서"), habit("운동"), habit("금주"),
+            Part("취침", bed?.let { "${Frontmatter.time(props["취침"])} · ${clock(r.bedBy)}까지 자면 ${format(bedPts)}점" } ?: "기록 없음",
+                if (bed != null && night(bed) <= night(r.bedBy)) bedPts else 0.0, bedPts),
             Part("기상", wake?.let { "${Frontmatter.time(props["기상"])} · ${clock(r.wakeBy)}까지 일어나면 ${format(wakePts)}점" } ?: "기록 없음",
                 if (wake != null && wake <= r.wakeBy) wakePts else 0.0, wakePts),
-            Part("수면", slept?.let { "${duration(it)} · ${duration(r.sleepAtLeast)} 이상이면 ${format(sleepPts)}점" } ?: "기상·취침 기록 없음",
-                if ((slept ?: 0) >= r.sleepAtLeast) sleepPts else 0.0, sleepPts),
             Part("스크린", used?.let { "${duration(it.toInt())} · ${duration(r.screenFull)} 이하 ${format(screenPts)}점, " +
                 "${duration(r.screenHalf)} 이하 ${format(screenPts / 2)}점" } ?: "기록 없음",
                 if (used == null) 0.0 else if (used <= r.screenFull) screenPts else if (used <= r.screenHalf) screenPts / 2 else 0.0, screenPts),
@@ -56,6 +56,9 @@ object Score {
     fun of(note: String?, screen: Long?): Double = minOf(MAX, parts(note, screen).sumOf { it.got })
 
     fun format(score: Double) = if (score % 1 == 0.0) "${score.toInt()}" else "$score"
+
+    // Bedtimes before noon belong to the night that started the day before, so 00:30 counts as later than 23:00.
+    private fun night(m: Int) = if (m < 12 * 60) m + 1440 else m
 
     fun clock(m: Int) = "%d:%02d".format(m / 60, m % 60)
 

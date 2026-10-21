@@ -191,7 +191,7 @@ object Prefs {
         Rules(
             points = Rules.DEFAULT_POINTS.mapValues { (k, v) -> p.getFloat("pts_$k", v.toFloat()).toDouble() },
             wakeBy = p.getInt("wakeBy", d.wakeBy),
-            sleepAtLeast = p.getInt("sleepAtLeast", d.sleepAtLeast),
+            bedBy = p.getInt("bedBy", d.bedBy),
             screenFull = p.getInt("screenFull", d.screenFull),
             screenHalf = p.getInt("screenHalf", d.screenHalf),
         )
@@ -199,7 +199,7 @@ object Prefs {
 
     fun setRules(ctx: Context, r: Rules) = prefs(ctx).edit().apply {
         r.points.forEach { (k, v) -> putFloat("pts_$k", v.toFloat()) }
-        putInt("wakeBy", r.wakeBy).putInt("sleepAtLeast", r.sleepAtLeast)
+        putInt("wakeBy", r.wakeBy).putInt("bedBy", r.bedBy)
         putInt("screenFull", r.screenFull).putInt("screenHalf", r.screenHalf)
     }.apply()
 

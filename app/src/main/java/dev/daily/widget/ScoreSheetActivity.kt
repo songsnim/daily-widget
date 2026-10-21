@@ -70,7 +70,7 @@ class ScoreSheetActivity : Activity() {
                     addView(text(p.detail, 13f, Ui.SUB))
                     val edits = when (p.label) {
                         "기상" -> listOf("기준 ${Score.clock(r.wakeBy)}까지" to { pick(r.wakeBy) { set(r.copy(wakeBy = it)) } })
-                        "수면" -> listOf("기준 ${Score.duration(r.sleepAtLeast)} 이상" to { pick(r.sleepAtLeast) { set(r.copy(sleepAtLeast = it)) } })
+                        "취침" -> listOf("기준 ${Score.clock(r.bedBy)}까지" to { pick(r.bedBy) { set(r.copy(bedBy = it)) } })
                         // Keep full <= half so the tiers stay in order.
                         "스크린" -> listOf(
                             "만점 ${Score.duration(r.screenFull)} 이하" to { pick(r.screenFull) { set(r.copy(screenFull = it, screenHalf = maxOf(it, r.screenHalf))) } },
