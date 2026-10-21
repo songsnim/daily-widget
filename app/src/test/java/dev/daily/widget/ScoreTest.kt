@@ -25,6 +25,19 @@ class ScoreTest {
     }
 
     @Test
+    fun customRulesMoveThresholdsAndPoints() {
+        val r = Rules(points = Rules.DEFAULT_POINTS + ("기상" to 1.0) + ("Big3" to 1.0),
+            wakeBy = 7 * 60, sleepAtLeast = 6 * 60, screenFull = 60, screenHalf = 90)
+        fun of(props: String, todos: String = "") = Score.parts(note(props, todos), null, r).sumOf { it.got }
+        assertEquals(1.5, of("취침: 01:00\n기상: 07:00"), 0.0) // up by 7:00 (1) + 6h sleep (0.5)
+        assertEquals(0.5, of("취침: 01:00\n기상: 07:01"), 0.0)
+        assertEquals(1.0, of("스크린타임: 01:00"), 0.0)
+        assertEquals(0.5, of("스크린타임: 01:30"), 0.0)
+        assertEquals(0.0, of("스크린타임: 01:31"), 0.0)
+        assertEquals(2.0, of("", "- [x] a 🔺\n- [x] b 🔺\n"), 0.0)
+    }
+
+    @Test
     fun big3ScoreHalfEachUpToThree() {
         // only Big3 (🔺) count; plain todos don't
         assertEquals(1.0, Score.of(note("", "- [x] a 🔺\n- [x] b 🔺\n- [x] plain\n- [ ] \n"), null), 0.0)

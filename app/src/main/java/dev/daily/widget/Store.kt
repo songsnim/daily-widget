@@ -149,6 +149,7 @@ object Store {
         // Browsing shows the day's own note; today shows tonight's 취침 after 18:00.
         val bedDate = if (offset == 0L) dev.daily.widget.dateFor("취침", now) else day
         val transparency = Prefs.transparency(ctx)
+        Score.rules = Prefs.rules(ctx)
         val problem = when {
             !Environment.isExternalStorageManager() -> "파일 접근 권한이 필요해요 · 눌러서 설정"
             !Vault.root.exists() -> "vault를 찾지 못했어요 · 눌러서 확인"
@@ -184,6 +185,23 @@ object Prefs {
     fun transparency(ctx: Context) = prefs(ctx).getInt("transparency", 10)
 
     fun setTransparency(ctx: Context, value: Int) = prefs(ctx).edit().putInt("transparency", value).apply()
+
+    fun rules(ctx: Context): Rules = prefs(ctx).let { p ->
+        val d = Rules()
+        Rules(
+            points = Rules.DEFAULT_POINTS.mapValues { (k, v) -> p.getFloat("pts_$k", v.toFloat()).toDouble() },
+            wakeBy = p.getInt("wakeBy", d.wakeBy),
+            sleepAtLeast = p.getInt("sleepAtLeast", d.sleepAtLeast),
+            screenFull = p.getInt("screenFull", d.screenFull),
+            screenHalf = p.getInt("screenHalf", d.screenHalf),
+        )
+    }
+
+    fun setRules(ctx: Context, r: Rules) = prefs(ctx).edit().apply {
+        r.points.forEach { (k, v) -> putFloat("pts_$k", v.toFloat()) }
+        putInt("wakeBy", r.wakeBy).putInt("sleepAtLeast", r.sleepAtLeast)
+        putInt("screenFull", r.screenFull).putInt("screenHalf", r.screenHalf)
+    }.apply()
 
     // Packages left out of screen time.
     fun excluded(ctx: Context): Set<String> = prefs(ctx).getStringSet("excluded", emptySet())!!
