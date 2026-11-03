@@ -39,7 +39,7 @@ data class State(
     val backlog get() = Backlog.parse(note(Vault.backlog).orEmpty())
     val todos get() = Todos.parse(note(Vault.daily(day)).orEmpty())
     val score get() = Score.of(note(Vault.daily(day)), screenMinutes)
-    val xp get() = Xp.week(today) { notes[it.path] }
+    fun gain(key: String) = Score.gain(note(Vault.daily(day)), screenMinutes, key)
 }
 
 // Optimistic pipeline modelled on life-dashboard: change the screen first, write in the background,
@@ -48,8 +48,6 @@ object Store {
     val state = MutableStateFlow<State?>(null)
     // Short-lived reward text on the 평가 cell ("+1") after a tap raises the score.
     val flash = MutableStateFlow<String?>(null)
-    // XP the widget bar shows instead of the live total while FxActivity's overlay fills it in place.
-    val xpHold = MutableStateFlow<Int?>(null)
     private var offset = 0L
     private var shiftedAt = 0L
     private val pending = AtomicInteger()
@@ -58,14 +56,6 @@ object Store {
     private val day = DateTimeFormatter.ofPattern("M월 d일(E)", Locale.KOREAN)
 
     fun dayLabel(date: LocalDate): String = date.format(day)
-
-    // Lets the widget bar catch up once the overlay is gone; outlives the activity that held it.
-    fun releaseXp(ctx: Context) {
-        if (xpHold.value == null) return
-        xpHold.value = null
-        val app = ctx.applicationContext
-        scope.launch { DailyWidget().updateAll(app) }
-    }
 
     suspend fun shift(ctx: Context, delta: Long) {
         offset = if (delta == 0L) 0 else offset + delta
@@ -165,7 +155,7 @@ object Store {
                 Vault.write(Vault.daily(yesterday), "Daily") { Score.apply(Frontmatter.set(it, "스크린타임", value), null) }
             }
         }
-        val files = listOf(Vault.daily(day), Vault.daily(bedDate), Vault.backlog) + Period.entries.map { Vault.period(it, today) } + Xp.files(today)
+        val files = listOf(Vault.daily(day), Vault.daily(bedDate), Vault.backlog) + Period.entries.map { Vault.period(it, today) }
         return State(
             today = today,
             day = day,

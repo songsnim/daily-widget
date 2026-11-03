@@ -79,8 +79,7 @@ class DailyWidget : GlanceAppWidget() {
         provideContent {
             val s by Store.state.collectAsState()
             val flash by Store.flash.collectAsState()
-            val hold by Store.xpHold.collectAsState()
-            s?.let { Content(it, flash, hold ?: it.xp) }
+            s?.let { Content(it, flash) }
         }
     }
 }
@@ -163,7 +162,7 @@ private fun toggleItem(target: String, i: Int, checked: Boolean): Action = actio
 )
 
 // Completing taps play their reward in FxActivity, which also records them. `cell` is the tapped cell's
-// widget-space rect; with the launcher's screen bounds for it, FxActivity finds the XP bar on screen.
+// widget-space rect; with the launcher's screen bounds for it, FxActivity maps the habit cells on screen.
 private fun fx(ctx: Context, geo: Geo, cell: FloatArray, kind: String, key: String = "", index: Int = -1) =
     Intent(ctx, FxActivity::class.java)
         .setData(Uri.parse("daily://fx/$kind/${Uri.encode(key)}/$index"))
@@ -171,7 +170,6 @@ private fun fx(ctx: Context, geo: Geo, cell: FloatArray, kind: String, key: Stri
         .putExtra(FxActivity.KEY, key)
         .putExtra(FxActivity.INDEX, index)
         .putExtra(FxActivity.CELL, cell)
-        .putExtra(FxActivity.BAR, geo.bar)
         .putExtra(FxActivity.RATIO, geo.ratio)
         .putExtra(FxActivity.HABITS, HABITS.indices.flatMap { geo.habit(it).asList() }.toFloatArray())
         .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
@@ -218,8 +216,8 @@ private val BOX = Color(0xFF4E4E57)
 private val TEXT = ColorProvider(Color(0xFFFFFFFF))
 private val SUB = ColorProvider(Color(0xFF9E9EA4))
 private val FAINT = ColorProvider(Color(0xFF6B6B73))
-private val GOLD = ColorProvider(Color(0xFFFFC94D))
-private val TRACK = ColorProvider(Color(0x24FFFFFF))
+private val METER = ColorProvider(Color(0x14FFFFFF))
+private val BUBBLE = ColorProvider(Color(0xFFDCE8FF))
 
 private enum class Tone { VALUE, CTA, EMPTY }
 
@@ -231,16 +229,17 @@ private const val MOCK_WIDTH = 362f
 private const val MOCK_MIN_HEIGHT = 260f
 
 // Widget-space rects (x, y, w, h in dp) mirroring Scaled's layout, for the cells that open FxActivity
-// and for the XP bar. Keep in step with the layout below.
+// and for placing the "+N" bubbles. Keep in step with the layout below.
 // `ratio`: One UI's hsResizeRatio, how much the launcher shrinks the laid-out widget on screen. sourceBounds
 // carries the cell's on-screen corner but its unscaled width, so FxActivity needs this to get the real scale.
 private class Geo(private val w: Float, h: Float, val ratio: Float = 1f) {
     val s = minOf(w / MOCK_WIDTH, h / MOCK_MIN_HEIGHT)
-    private val bottomY = h - 118 * s // padding 6 + bar 4 + gap 5 + bottom row 103
-    val bar = floatArrayOf(10 * s, h - 10 * s, w - 20 * s, 4 * s)
+    private val bottomY = h - 109 * s // padding 6 + bottom row 103
     fun value(i: Int): FloatArray { val cw = (w - 28 * s) / 5; return floatArrayOf(6 * s + i * (cw + 4 * s), 6 * s, cw, 53 * s) }
     fun habit(i: Int): FloatArray { val hh = 95 * s / 3; return floatArrayOf(6 * s, bottomY + i * (hh + 4 * s), 40 * s, hh) }
     fun goal(k: Int): FloatArray { val rh = (bottomY - 71 * s) / 3; return floatArrayOf(50 * s, 65 * s + k * rh, 37 * s, rh) }
+    // Row k of today's list: the cell spans x 50..w-48 and two habit rows plus a gap, inset 1dp top and bottom.
+    fun todo(k: Int): FloatArray { val rh = (95 * s / 3 * 2 + 2 * s) / 3; return floatArrayOf(50 * s, bottomY + s + k * rh, w - 98 * s, rh) }
 }
 
 private val LocalGeo = staticCompositionLocalOf { Geo(MOCK_WIDTH, MOCK_MIN_HEIGHT) }
@@ -248,14 +247,19 @@ private val Int.d: Dp @Composable get() = (this * LocalGeo.current.s).dp
 private val Int.s: TextUnit @Composable get() = (this * LocalGeo.current.s).sp
 
 @Composable
-private fun Content(s: State, flash: String?, xp: Int) {
+private fun Content(s: State, flash: String?) {
     val size = LocalSize.current
     val ratio = (LocalAppWidgetOptions.current.get("hsResizeRatio") as? Number)?.toFloat()?.takeIf { it > 0f } ?: 1f
-    CompositionLocalProvider(LocalGeo provides Geo(size.width.value, size.height.value, ratio)) { Scaled(s, flash, xp) }
+    CompositionLocalProvider(LocalGeo provides Geo(size.width.value, size.height.value, ratio)) {
+        Box(GlanceModifier.fillMaxSize()) {
+            Scaled(s, flash)
+            Bubbles(s)
+        }
+    }
 }
 
 @Composable
-private fun Scaled(s: State, flash: String?, xp: Int) {
+private fun Scaled(s: State, flash: String?) {
     val ctx = LocalContext.current
     val opacity = 1f - s.transparency / 100f
     val base = ColorProvider(BASE.copy(alpha = opacity))
@@ -269,7 +273,7 @@ private fun Scaled(s: State, flash: String?, xp: Int) {
             Cell("설정", s.problem, Tone.VALUE, actionStartActivity<MainActivity>(), surface, GlanceModifier.fillMaxSize())
             return@Column
         }
-        // 5x3 (~271dp): values 53 | goals (rest, ~86) | habits + today + backlog 103 | XP bar.
+        // 5x3 (~271dp): values 53 | goals (rest, ~95) | habits + today + backlog 103.
         Row(GlanceModifier.fillMaxWidth().height(53.d)) { Values(ctx, s, flash, surface) }
         Spacer(GlanceModifier.height(4.d))
         Bordered(surface, GlanceModifier.fillMaxWidth().defaultWeight()) {
@@ -304,12 +308,33 @@ private fun Scaled(s: State, flash: String?, xp: Int) {
                 }
             }
         }
-        // This week's XP. The reward overlay draws its fill exactly over this bar (Geo.bar, same pill shape
-        // and gold) while Store.xpHold keeps it at the old total, so the two read as one bar filling up.
-        Spacer(GlanceModifier.height(5.d))
-        Box(GlanceModifier.fillMaxWidth().height(4.d).padding(horizontal = 4.d)) {
-            LinearProgressIndicator(minOf(1f, xp / Xp.TARGET.toFloat()),
-                GlanceModifier.fillMaxSize().cornerRadius(2.d), GOLD, TRACK)
+    }
+}
+
+// "+N" bubbles: what tapping an open habit, 기상 or Big3 would add to today's 평가 right now. They float on their
+// own layer over the cell's corner, spilling past its edge, and take no clicks, so taps reach the cells below.
+@Composable
+private fun Bubbles(s: State) {
+    if (s.problem != null || s.day != s.today) return
+    val geo = LocalGeo.current
+    val sc = geo.s
+    // Over a cell's top-right corner, as in Geo's cell rects.
+    fun corner(r: FloatArray) = r[0] + r[2] - 21 * sc to maxOf(0f, r[1] - 7 * sc)
+    val at = mutableListOf<Pair<Pair<Float, Float>, Double>>()
+    HABITS.forEachIndexed { i, key -> at += corner(geo.habit(i)) to s.gain(key) }
+    if (Frontmatter.time(s.props["기상"]) == null) at += corner(geo.value(1)) to s.gain("기상")
+    // Big3 rows: at the list's right end, poking out over the journal button.
+    shownTodos(s).forEachIndexed { k, (_, item) ->
+        if (item.big && !item.checked) geo.todo(k).let { r -> at += (r[0] + r[2] - 20 * sc to r[1] + r[3] / 2 - 8 * sc) to s.gain("Big3") }
+    }
+    at.filter { it.second > 0 }.forEach { (xy, gain) ->
+        Box(GlanceModifier.fillMaxSize().padding(start = xy.first.dp, top = xy.second.dp)) {
+            Box(GlanceModifier.width(32.d).height(19.d).background(ImageProvider(R.drawable.bubble))) {
+                Box(GlanceModifier.width(32.d).height(16.d), contentAlignment = Alignment.Center) {
+                    Text("+${Score.format(gain)}", maxLines = 1,
+                        style = TextStyle(color = BUBBLE, fontSize = 10.s, fontWeight = FontWeight.Bold))
+                }
+            }
         }
     }
 }
@@ -364,7 +389,8 @@ private fun RowScope.Values(ctx: Context, s: State, flash: String?, surface: Col
     // Computed live (today's screen time so far); tapping opens the breakdown.
     Cell(flash ?: "평가", Score.format(s.score), Tone.VALUE,
         open(ctx, ScoreSheetActivity::class.java, ScoreSheetActivity.DATE, s.day.toString()), surface,
-        GlanceModifier.defaultWeight(), captionColor = if (flash != null) TEXT else SUB, lit = flash != null)
+        GlanceModifier.defaultWeight(), captionColor = if (flash != null) TEXT else SUB, lit = flash != null,
+        meter = (s.score / Score.MAX).toFloat())
 }
 
 // One period per row, like life-dashboard's collapsed mobile preview: the first non-blank goal with a live checkbox.
@@ -426,9 +452,7 @@ private fun Label(p: Period) {
 private fun TodayList(ctx: Context, s: State, box: ColorProvider, surface: ColorProvider, modifier: GlanceModifier) {
     val open = listSheet(ctx, GoalSheetActivity.TODAY, day = s.day)
     val add = listSheet(ctx, GoalSheetActivity.TODAY, focusAdd = true, day = s.day)
-    val real = s.todos.withIndex().filter { it.value.text.isNotEmpty() }
-    // Done ones only fill rows nothing undone needs, checked and struck through.
-    val shown = (real.filter { !it.value.checked }.bigFirst() + real.filter { it.value.checked }).take(Score.TODOS)
+    val shown = shownTodos(s)
     Bordered(surface, modifier) {
         Column(GlanceModifier.fillMaxSize().padding(vertical = 1.d)) {
             if (shown.isEmpty()) {
@@ -454,6 +478,12 @@ private fun TodayList(ctx: Context, s: State, box: ColorProvider, surface: Color
             repeat(Score.TODOS - shown.size) { Box(GlanceModifier.fillMaxWidth().defaultWeight().clickable(add)) {} }
         }
     }
+}
+
+// Done ones only fill rows nothing undone needs, checked and struck through.
+private fun shownTodos(s: State): List<IndexedValue<Goal>> {
+    val real = s.todos.withIndex().filter { it.value.text.isNotEmpty() }
+    return (real.filter { !it.value.checked }.bigFirst() + real.filter { it.value.checked }).take(Score.TODOS)
 }
 
 // The backlog as one line: its top undone item (checked off quietly, no reward) and how many wait behind it.
@@ -531,7 +561,8 @@ private fun Toggle(label: String, done: Boolean, action: Action?, surface: Color
 
 @Composable
 private fun Cell(caption: String, value: String, tone: Tone, action: Action?, surface: ColorProvider,
-                 modifier: GlanceModifier, captionColor: ColorProvider = SUB, lit: Boolean = false, hit: Intent? = null) {
+                 modifier: GlanceModifier, captionColor: ColorProvider = SUB, lit: Boolean = false, hit: Intent? = null,
+                 meter: Float? = null) {
     val valueStyle = when (tone) {
         Tone.VALUE -> TextStyle(color = TEXT, fontSize = 14.s, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center)
         Tone.CTA -> TextStyle(color = BLUE, fontSize = 14.s, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center)
@@ -542,6 +573,11 @@ private fun Cell(caption: String, value: String, tone: Tone, action: Action?, su
             Column(verticalAlignment = Alignment.CenterVertically, horizontalAlignment = Alignment.CenterHorizontally) {
                 Text(caption, maxLines = 1, style = TextStyle(color = captionColor, fontSize = 13.s, textAlign = TextAlign.Center))
                 Text(value, maxLines = 1, style = valueStyle)
+            }
+            // 평가 out of 5 as a thin bar along the cell's bottom.
+            if (meter != null) Box(GlanceModifier.fillMaxSize().padding(start = 10.d, end = 10.d, bottom = 6.d),
+                contentAlignment = Alignment.BottomCenter) {
+                LinearProgressIndicator(meter, GlanceModifier.fillMaxWidth().height(3.d).cornerRadius(2.d), TEXT, METER)
             }
         }
     }

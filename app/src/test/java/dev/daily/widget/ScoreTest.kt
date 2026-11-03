@@ -40,6 +40,17 @@ class ScoreTest {
     }
 
     @Test
+    fun gainIsWhatATapAddsAfterTheCap() {
+        assertEquals(1.0, Score.gain(note(""), null, "운동"), 0.0)
+        assertEquals(0.0, Score.gain(note("운동: true"), null, "운동"), 0.0)
+        assertEquals(0.5, Score.gain(note("", "- [x] a 🔺\n- [ ] b 🔺\n"), null, "Big3"), 0.0)
+        assertEquals(0.0, Score.gain(note("", "- [x] a 🔺\n- [x] b 🔺\n- [x] c 🔺\n"), null, "Big3"), 0.0)
+        // at 4.5 a 1-point habit only reaches the cap
+        val near = "독서: true\n금주: true\n취침: 22:00\n기상: 07:00\n스크린타임: 01:00"
+        assertEquals(0.5, Score.gain(note(near, "- [x] a 🔺\n- [x] b 🔺\n"), null, "운동"), 0.0)
+    }
+
+    @Test
     fun big3ScoreHalfEachUpToThree() {
         // only Big3 (🔺) count; plain todos don't
         assertEquals(1.0, Score.of(note("", "- [x] a 🔺\n- [x] b 🔺\n- [x] plain\n- [ ] \n"), null), 0.0)

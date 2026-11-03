@@ -27,7 +27,6 @@ class FxActivity : Activity() {
         const val KEY = "key"
         const val INDEX = "index"
         const val CELL = "cell"
-        const val BAR = "bar"
         const val RATIO = "ratio"
         const val HABIT = "habit"
         const val WAKE = "wake"
@@ -73,17 +72,12 @@ class FxActivity : Activity() {
         view.reset()
         job = scope.launch {
             if (Store.state.value == null) Store.refresh(applicationContext)
-            val bar = widgetBar()
-            // Keep the widget bar at the old total so the overlay can fill it in place.
-            if (bar != null) Store.xpHold.value = Store.state.value?.xp
             val show = Store.state.value?.takeIf { it.problem == null }?.let { perform(kind, key, index) }
-            if (show == null) { Store.releaseXp(applicationContext); finish(); return@launch }
+            if (show == null) { finish(); return@launch }
             // One UI's launcher slides widget launches up whatever we ask for, so draw nothing until the window
-            // has settled; otherwise the bar rises from below and reads as a second bar.
+            // has settled; otherwise the burst rises from below with it.
             if (wait) withTimeoutOrNull(800) { entered.await() }
-            view.play(show, from, bar) {
-                // The overlay's last frame stays up while the widget redraws at the new total, then both match.
-                Store.releaseXp(applicationContext)
+            view.play(show, from) {
                 job = scope.launch {
                     delay(400)
                     view.visibility = View.INVISIBLE // empty before the exit animation, so nothing slides away
@@ -103,7 +97,7 @@ class FxActivity : Activity() {
             val c = cells.copyOfRange(i * 4, i * 4 + 4)
             props[HABITS_KEYS[i]] != "true" && RectF(o.x + c[0] * k, o.y + c[1] * k, o.x + (c[0] + c[2]) * k, o.y + (c[1] + c[3]) * k).contains(x, y)
         }
-        if (hit == null) { Store.releaseXp(applicationContext); finish(); return }
+        if (hit == null) { finish(); return }
         val c = cells!!.copyOfRange(hit * 4, hit * 4 + 4)
         run(HABIT, HABITS_KEYS[hit], -1, PointF(o!!.x + (c[0] + c[2] / 2) * k, o.y + (c[1] + c[3] / 2) * k), wait = false)
     }
@@ -115,40 +109,20 @@ class FxActivity : Activity() {
         entered.complete(Unit)
     }
 
-    // The widget's own XP bar on screen, mapped through the tapped cell. Its right end is kept within the
-    // mirror of its left margin: a widget never reaches past the screen's opposite edge, and One UI's scaling
-    // can make the mapped width run long (the fill then spilled onto the home screen).
-    private fun widgetBar(): RectF? {
-        val o = origin ?: return null
-        val bar = intent.getFloatArrayExtra(BAR) ?: return null
-        val left = o.x + bar[0] * k
-        val right = minOf(o.x + (bar[0] + bar[2]) * k, resources.displayMetrics.widthPixels - left)
-        return RectF(left, o.y + bar[1] * k, right, o.y + (bar[1] + bar[3]) * k)
-    }
-
     override fun onDestroy() {
-        Store.releaseXp(applicationContext) // never leave the widget bar stuck if the activity dies early
         scope.cancel()
         super.onDestroy()
     }
 
-    private fun xp() = Store.state.value!!.xp
-
     private fun perform(kind: String, key: String, index: Int): Show? {
         val now = LocalDateTime.now()
         val today = now.toLocalDate()
-        val before = xp()
-        fun show(tier: Tier, rarity: Xp.Rarity, base: Int, all: Boolean = false, title: String = "", sub: String = ""): Show {
-            val delta = xp() - before
-            val gain = minOf(delta, base * rarity.mult).coerceAtLeast(0) // 0 outside this week or on a backfilled day
-            return Show(tier, rarity, gain, (delta - gain).coerceAtLeast(0), before, all, title, sub)
-        }
         return when (kind) {
             HABIT -> {
                 val date = Store.dateFor(key, now)
                 Store.setProp(this, key, "true", date)
                 val props = Frontmatter.parse(Store.state.value!!.note(Vault.daily(date)))
-                show(Tier.HABIT, Xp.rarity(date, key), Xp.HABIT[key] ?: 0, all = Xp.HABIT.keys.all { props[it] == "true" })
+                Show(Tier.HABIT, all = HABITS_KEYS.all { props[it] == "true" })
             }
             WAKE -> {
                 val value = now.format(DateTimeFormatter.ofPattern("HH:mm"))
@@ -157,8 +131,8 @@ class FxActivity : Activity() {
                 val sleep = Score.sleep(Frontmatter.parse(Store.state.value!!.note(Vault.daily(date))))
                 val slept = sleep?.let { "${it / 60}시간" + if (it % 60 > 0) " ${it % 60}분" else "" }
                 if (sleep != null && sleep >= 7 * 60)
-                    show(Tier.WAKE, Xp.rarity(date, "기상"), Xp.WAKE, title = "$slept 푹 잤어요", sub = "오늘도 힘차게 시작해요!")
-                else show(Tier.WAKE_LOW, Xp.Rarity.NORMAL, 0,
+                    Show(Tier.WAKE, title = "$slept 푹 잤어요", sub = "오늘도 힘차게 시작해요!")
+                else Show(Tier.WAKE_LOW,
                     title = slept?.let { "$it 잤어요" } ?: "$value 기상", sub = if (slept != null) "오늘은 무리하지 마요" else "좋은 아침이에요")
             }
             BED -> {
@@ -172,7 +146,7 @@ class FxActivity : Activity() {
                 val goals = Store.state.value!!.goals(p).orEmpty().filter { it.text.isNotEmpty() }
                 val text = Goals.parse(Store.state.value!!.note(Vault.period(p, today)).orEmpty()).getOrNull(index)?.text ?: return null
                 val tier = when (p) { Period.WEEK -> Tier.WEEK; Period.MONTH -> Tier.MONTH; Period.YEAR -> Tier.YEAR }
-                show(tier, Xp.rarity(today, Xp.goalId(p, text)), Xp.goal(p), all = goals.all { it.checked }, title = text)
+                Show(tier, all = goals.all { it.checked }, title = text)
             }
             else -> null
         }

@@ -55,6 +55,15 @@ object Score {
 
     fun of(note: String?, screen: Long?): Double = minOf(MAX, parts(note, screen).sumOf { it.got })
 
+    // How much 평가 rises if `key` (a habit, 기상 or one more Big3) is done now, after the cap; 0 once it's done.
+    fun gain(note: String?, screen: Long?, key: String): Double {
+        val parts = parts(note, screen)
+        val got = parts.sumOf { it.got }
+        val part = parts.first { it.label == key }
+        val add = minOf(rules.pts(key), part.max - part.got)
+        return minOf(MAX, got + add) - minOf(MAX, got)
+    }
+
     fun format(score: Double) = if (score % 1 == 0.0) "${score.toInt()}" else "$score"
 
     // Bedtimes before noon belong to the night that started the day before, so 00:30 counts as later than 23:00.

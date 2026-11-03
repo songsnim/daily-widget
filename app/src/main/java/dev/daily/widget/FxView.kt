@@ -23,7 +23,6 @@ import android.os.VibrationEffect.Composition.PRIMITIVE_TICK
 import android.os.VibratorManager
 import android.view.View
 import kotlin.math.PI
-import kotlin.math.abs
 import kotlin.math.cos
 import kotlin.math.hypot
 import kotlin.math.max
@@ -34,21 +33,16 @@ import kotlin.math.sqrt
 
 enum class Tier { HABIT, WEEK, MONTH, YEAR, WAKE, WAKE_LOW, BED }
 
-// What one tap earned. gain = the item's XP after its rarity roll, bonus = a completion bonus it unlocked
-// (완벽한 하루 / 주간·월간 올클리어); both 0 when the note lies outside this week.
+// What one tap completed. all = it finished a set (완벽한 하루 / 주간·월간 올클리어).
 data class Show(
     val tier: Tier,
-    val rarity: Xp.Rarity = Xp.Rarity.NORMAL,
-    val gain: Int = 0,
-    val bonus: Int = 0,
-    val before: Int = 0,
     val all: Boolean = false,
     val title: String = "",
     val sub: String = "",
 )
 
 // The reward overlay: one Canvas particle engine shared by every tier so all rewards speak the same language
-// (gold burst, XP orbs flying into the weekly bar); only the scale grows with importance. Port of the
+// (gold burst, confetti, fireworks); only the scale grows with importance. Port of the
 // "보상 시스템 최종안" mockup.
 class FxView(ctx: Context) : View(ctx) {
     private val dp = resources.displayMetrics.density
@@ -58,12 +52,10 @@ class FxView(ctx: Context) : View(ctx) {
     private fun clamp(t: Float) = t.coerceIn(0f, 1f)
     private fun eo(t: Float) = 1 - (1 - clamp(t)).pow(3)
     private fun eio(x0: Float): Float { val x = clamp(x0); return if (x < .5f) 4 * x * x * x else 1 - (-2 * x + 2).pow(3) / 2 }
-    private fun backOut(t: Float) = 1 + 2.7f * (t - 1).pow(3) + 1.7f * (t - 1).pow(2)
 
     private val gold = listOf(0xFFFFC94D, 0xFFFFE08A, 0xFFFFFFFF, 0xFFF2A93B, 0xFFFFF3D0).map { it.toInt() }
     private val accent = listOf(0xFFFFB547, 0xFFFF8A3D, 0xFFFFF3D0).map { it.toInt() }
     private val warm = listOf(0xFFFFD36E, 0xFFFFB547, 0xFFFFF3D6, 0xFFFF8A3D).map { it.toInt() }
-    private val orbGold = 0xFFFFC94D.toInt()
 
     // ---------- particles ----------
     private enum class K { SPARK, CONF, RING, STAR, DOT, DUST }
@@ -106,89 +98,6 @@ class FxView(ctx: Context) : View(ctx) {
     }
 
     private fun tick(scale: Float = .4f) = buzz(Triple(PRIMITIVE_TICK, scale, 0))
-
-    // ---------- weekly XP bar ----------
-    private var showBar = false
-    private var barBase = 0
-    private var landed = 0
-    private var pendingOrbs = 0
-    private var lastLand = 0L
-    private var bump = -1000L
-    private var orbN = 0
-    private var gainLabel = ""
-    private var gainColor = Color.WHITE
-    // The widget's own bar when FxActivity could place it on screen; otherwise a bar near the top.
-    private var widgetBar: RectF? = null
-    private val barW get() = widgetBar?.width() ?: (width * .8f)
-    private val barX get() = widgetBar?.left ?: ((width - barW) / 2)
-    private val barY get() = widgetBar?.centerY() ?: (rootWindowInsets?.systemWindowInsetTop?.plus(56 * dp) ?: (80 * dp))
-    private fun shown() = barBase + landed
-    private fun head() = PointF(barX + barW * min(1f, shown() / Xp.TARGET.toFloat()), barY)
-
-    private fun drawBar(c: Canvas, now: Long) {
-        if (!showBar) return
-        val fadeIn = clamp(now / 220f)
-        val fadeOut = if (pendingOrbs == 0 && lastLand > 0) 1 - clamp((now - lastLand - 700) / 300f) else 1f
-        val a = min(fadeIn, fadeOut)
-        if (widgetBar != null) return drawOnWidget(c, now, a)
-        if (a <= 0) return
-        val v = shown()
-        val over = v >= Xp.TARGET
-        text.typeface = heavy; text.textSize = 12 * dp; text.textAlign = Paint.Align.LEFT
-        text.setShadowLayer(3 * dp, 0f, dp, 0xCC000000.toInt())
-        text.color = if (over) 0xFFFFD66B.toInt() else Color.WHITE; text.alpha = (255 * a).toInt()
-        val label = "이번 주 · $v / ${Xp.TARGET} XP" + if (v > Xp.TARGET) " · 목표 초과" else ""
-        c.drawText(label, barX, barY - 9 * dp, text)
-        text.textAlign = Paint.Align.RIGHT; text.color = gainColor; text.alpha = (255 * a).toInt()
-        c.drawText(gainLabel, barX + barW, barY - 9 * dp, text)
-        text.clearShadowLayer(); text.textAlign = Paint.Align.CENTER
-        val h = 5 * dp
-        val track = RectF(barX, barY - h / 2, barX + barW, barY + h / 2)
-        paint.reset(); paint.isAntiAlias = true
-        paint.color = 0x24FFFFFF; paint.alpha = (0x24 * a).toInt()
-        c.drawRoundRect(track, h, h, paint)
-        val fillW = barW * min(1f, v / Xp.TARGET.toFloat())
-        if (fillW > 0) {
-            val lit = if (now - bump < 90) 1.5f else 1f
-            paint.shader = LinearGradient(barX, 0f, barX + barW, 0f,
-                intArrayOf(0xFFF29D1B.toInt(), 0xFFFFC94D.toInt(), 0xFFFFE8A3.toInt()), floatArrayOf(0f, .6f, 1f), Shader.TileMode.CLAMP)
-            paint.alpha = (255 * a).toInt()
-            paint.setShadowLayer(10 * dp * lit, 0f, 0f, 0xFFFFB21F.toInt())
-            c.drawRoundRect(RectF(barX, track.top, barX + fillW, track.bottom), h, h, paint)
-            paint.shader = null; paint.clearShadowLayer()
-        }
-    }
-
-    // Over the widget's own bar (held at the old total by Store.xpHold): no track, just the widget's flat gold
-    // fill growing in its exact pill, so it reads as the widget bar filling. The fill never fades; it stays
-    // until the activity releases the hold and the widget bar has caught up underneath. Only labels fade.
-    private fun drawOnWidget(c: Canvas, now: Long, a: Float) {
-        val r = widgetBar!!
-        val v = shown()
-        val h = r.height()
-        val fillW = r.width() * min(1f, v / Xp.TARGET.toFloat())
-        paint.reset(); paint.isAntiAlias = true
-        paint.color = orbGold
-        if (now - bump < 90) paint.setShadowLayer(8 * dp, 0f, 0f, 0xFFFFB21F.toInt())
-        // Like the widget's progress bar: a square-ended fill clipped by the whole track's pill outline.
-        if (fillW > 0) {
-            c.save()
-            c.clipPath(Path().apply { addRoundRect(r, h / 2, h / 2, Path.Direction.CW) })
-            c.drawRect(r.left, r.top, r.left + fillW, r.bottom, paint)
-            c.restore()
-        }
-        paint.clearShadowLayer()
-        if (a <= 0) return
-        // Labels sit just below the widget's bottom edge so they never cover its cells.
-        val y = r.bottom + 17 * dp
-        text.typeface = heavy; text.textSize = 12 * dp; text.textAlign = Paint.Align.LEFT
-        text.setShadowLayer(3 * dp, 0f, dp, 0xCC000000.toInt())
-        text.color = if (v >= Xp.TARGET) 0xFFFFD66B.toInt() else Color.WHITE; text.alpha = (255 * a).toInt()
-        c.drawText("이번 주 · $v / ${Xp.TARGET} XP" + if (v > Xp.TARGET) " · 목표 초과" else "", r.left, y, text)
-        text.textAlign = Paint.Align.RIGHT; text.color = gainColor; text.alpha = (255 * a).toInt()
-        c.drawText(gainLabel, r.right, y, text)
-        text.clearShadowLayer(); text.textAlign = Paint.Align.CENTER
-    }
 
     // ---------- shared visual vocabulary ----------
     private fun burst(x: Float, y: Float, m: Float = 1f, pal: List<Int> = gold, acc: List<Int> = accent, conf: Boolean = true) {
@@ -291,122 +200,6 @@ class FxView(ctx: Context) : View(ctx) {
         c.drawText(sub, width / 2f, y + dy + 24 * dp, text)
     }
 
-    private fun holo(now: Long, x0: Float, x1: Float): Shader {
-        val cs = IntArray(7) { Color.HSVToColor(floatArrayOf(((now / 5f + it * 55) % 360), .55f, 1f)) }
-        return LinearGradient(x0, 0f, x1, 0f, cs, null, Shader.TileMode.CLAMP)
-    }
-
-    // ---------- variable reward: reel -> reveal -> orbs into the bar ----------
-    private fun reward(s: Show, from: PointF, orbs: IntArray, odur: Long, small: Boolean, orbFrom: PointF = from,
-                       orbDelay: Long = 250, orbColor: Int = orbGold) {
-        if (s.gain <= 0) return
-        showBar = true
-        val a = PointF(from.x.coerceIn(56 * dp, width - 56 * dp), from.y - (if (small) 22 else 32) * dp)
-        val k = s.rarity
-        val labels = listOf("+XP" to 0xFFFFE08A.toInt(), "×2" to 0xFFFFB21F.toInt(), "잭팟" to 0)
-        val strip = List(9) { labels[it % 3] } + labels[k.ordinal]
-        layer(0, 250) { c, p, now ->
-            val w = (if (small) 60 else 78) * dp; val h = (if (small) 20 else 24) * dp
-            c.save(); c.translate(a.x, a.y)
-            val box = RectF(-w / 2, -h / 2, w / 2, h / 2)
-            paint.reset(); paint.isAntiAlias = true; paint.color = 0xD10E121E.toInt()
-            c.drawRoundRect(box, h / 2, h / 2, paint)
-            paint.style = Paint.Style.STROKE; paint.strokeWidth = dp; paint.color = 0x4DFFFFFF
-            c.drawRoundRect(box, h / 2, h / 2, paint); paint.style = Paint.Style.FILL
-            c.clipRect(box)
-            val off = eo(p) * (strip.size - 1) * h
-            text.typeface = heavy; text.textSize = (if (small) 11 else 13) * dp
-            strip.forEachIndexed { i, (label, col) ->
-                val y = i * h - off
-                if (abs(y) > h) return@forEachIndexed
-                if (col == 0) text.shader = holo(now, -20 * dp, 20 * dp) else text.color = col
-                c.drawText(label, 0f, y + text.textSize * .35f, text); text.shader = null
-            }
-            c.restore()
-        }
-        es += E(250, 1, start = {
-            gainLabel = when (k) { Xp.Rarity.CRIT -> "크리티컬 "; Xp.Rarity.JACKPOT -> "잭팟 "; else -> "" } + "+${s.gain} XP"
-            gainColor = if (k == Xp.Rarity.NORMAL) 0xFFFFE08A.toInt() else 0xFFFFC94D.toInt()
-            when (k) {
-                Xp.Rarity.CRIT -> buzz(Triple(PRIMITIVE_THUD, .7f, 0), Triple(PRIMITIVE_CLICK, 1f, 40))
-                Xp.Rarity.JACKPOT -> buzz(Triple(PRIMITIVE_QUICK_RISE, 1f, 0), Triple(PRIMITIVE_CLICK, 1f, 30),
-                    Triple(PRIMITIVE_CLICK, 1f, 60), Triple(PRIMITIVE_THUD, 1f, 60))
-                else -> tick(.5f)
-            }
-        })
-        if (k == Xp.Rarity.JACKPOT) layer(250, 950) { c, p, now ->
-            paint.reset(); paint.isAntiAlias = true; paint.style = Paint.Style.STROKE; paint.strokeWidth = 5 * dp
-            paint.shader = holo(now, 0f, width.toFloat()); paint.alpha = (255 * sin(p * PI).toFloat() * .75f).toInt()
-            c.drawRect(2.5f * dp, 2.5f * dp, width - 2.5f * dp, height - 2.5f * dp, paint); paint.shader = null
-        }
-        layer(250, if (small) 600 else 1000) { c, p, now ->
-            val sc = if (p < .18f) backOut(p / .18f) else 1f
-            val al = if (p > .72f) (1 - p) / .28f else 1f
-            c.save(); c.translate(a.x, a.y - 14 * dp * p); c.scale(sc, sc)
-            if (k == Xp.Rarity.JACKPOT) repeat(6) { i ->
-                val g = now / 500f + i * PI.toFloat() / 3
-                paint.reset(); paint.isAntiAlias = true
-                paint.color = Color.HSVToColor(floatArrayOf((now / 4f + i * 60) % 360, .6f, 1f)); paint.alpha = (255 * al).toInt()
-                star(c, cos(g) * 62 * dp, sin(g) * 20 * dp, (4 + 2 * sin(now / 120f + i)) * dp, now / 300f)
-            }
-            val main = when (k) { Xp.Rarity.NORMAL -> "+${s.gain} XP"; Xp.Rarity.CRIT -> "크리티컬! ×2"; Xp.Rarity.JACKPOT -> "잭팟 ×5" }
-            text.typeface = heavy
-            text.textSize = ((if (k == Xp.Rarity.JACKPOT) 21 else if (k == Xp.Rarity.CRIT) 18 else 16) - (if (small) 3 else 0)) * dp
-            text.setShadowLayer(14 * dp, 0f, 0f, 0xE6FFAA1E.toInt())
-            when (k) {
-                Xp.Rarity.NORMAL -> text.color = Color.WHITE
-                Xp.Rarity.CRIT -> text.shader = LinearGradient(-55 * dp, 0f, 55 * dp, 0f,
-                    intArrayOf(0xFFFFE8A3.toInt(), 0xFFFFC94D.toInt(), 0xFFF29D1B.toInt()), null, Shader.TileMode.CLAMP)
-                Xp.Rarity.JACKPOT -> text.shader = holo(now, -50 * dp, 50 * dp)
-            }
-            text.alpha = (255 * al).toInt()
-            c.drawText(main, 0f, text.textSize * .35f, text); text.shader = null; text.clearShadowLayer()
-            if (k != Xp.Rarity.NORMAL) {
-                text.textSize = 12 * dp; text.color = 0xFFFFE3A3.toInt(); text.alpha = (255 * al).toInt()
-                c.drawText("+${s.gain} XP", 0f, 22 * dp, text)
-            }
-            c.restore()
-        }
-        orbs(orbFrom, orbs[k.ordinal], s.gain, orbDelay, orbColor, odur, k)
-    }
-
-    private fun orbs(from: PointF, n: Int, amount: Int, delay: Long, color: Int, dur: Long, k: Xp.Rarity = Xp.Rarity.NORMAL) {
-        showBar = true
-        val base = amount / n; val rem = amount - base * n
-        val spread = min(60f, 6f + n * 2) * dp
-        repeat(n) { i ->
-            val chunk = base + if (i < rem) 1 else 0
-            val ang = r(0f, 6.28f)
-            val b = PointF(from.x + cos(ang) * (14 * dp + r(0f, spread)), from.y + sin(ang) * (10 * dp + r(0f, spread * .6f)))
-            val bend = r(-70f, 70f) * dp; val lift = r(50f, 110f) * dp
-            fun pos(p: Float): PointF {
-                if (p < .22f) { val q = eo(p / .22f); return PointF(from.x + (b.x - from.x) * q, from.y + (b.y - from.y) * q) }
-                val t = ((p - .22f) / .78f).pow(2); val h = head(); val cx = b.x + bend; val cy = min(b.y, h.y) - lift; val u = 1 - t
-                return PointF(u * u * b.x + 2 * u * t * cx + t * t * h.x, u * u * b.y + 2 * u * t * cy + t * t * h.y)
-            }
-            pendingOrbs++
-            val col = when (k) { Xp.Rarity.CRIT -> 0xFFFFB21F.toInt(); else -> color }
-            es += E(delay + i * (if (n > 12) 22L else 40L), dur + r(0f, 80f).toLong(), draw = { c, p, now ->
-                val rad = (3.4f - p) * dp
-                paint.reset(); paint.isAntiAlias = true; paint.blendMode = BlendMode.PLUS
-                for (j in 3 downTo 1) { val q = pos(max(0f, p - j * .035f)); orb(c, q.x, q.y, rad * .8f, if (k == Xp.Rarity.JACKPOT) hue(now, i) else col, .22f / j) }
-                val q = pos(p); orb(c, q.x, q.y, rad, if (k == Xp.Rarity.JACKPOT) hue(now, i) else col, 1f)
-                paint.blendMode = null
-            }, end = {
-                landed += chunk; pendingOrbs--; lastLand = SystemClock.uptimeMillis() - t0; bump = lastLand
-                if (orbN++ % 2 == 0) tick(.3f)
-            })
-        }
-    }
-
-    private fun hue(now: Long, i: Int) = Color.HSVToColor(floatArrayOf((now / 3f + i * 47) % 360, .55f, 1f))
-
-    private fun orb(c: Canvas, x: Float, y: Float, rad: Float, col: Int, a: Float) {
-        paint.color = col; paint.alpha = (60 * a).toInt(); c.drawCircle(x, y, rad * 3.2f, paint)
-        paint.alpha = (140 * a).toInt(); c.drawCircle(x, y, rad * 1.8f, paint)
-        paint.color = Color.WHITE; paint.alpha = (255 * a).toInt(); c.drawCircle(x, y, rad * .9f, paint)
-    }
-
     private fun star(c: Canvas, x: Float, y: Float, rad: Float, rot: Float) {
         val path = Path()
         for (i in 0 until 8) {
@@ -424,7 +217,7 @@ class FxView(ctx: Context) : View(ctx) {
             cannon(true, 45); cannon(false, 45)
         }
         flash(at, 650, 0x73FFD278, 0x1FFFAA28)
-        banner(at, 1900, "완벽한 하루", "독서 · 운동 · 금주 3/3 · +${Xp.DAY_BONUS} XP")
+        banner(at, 1900, "완벽한 하루", "독서 · 운동 · 금주 3/3")
         listOf(250L, 550L).forEach { ms -> at(at + ms) { firework(width * r(.2f, .8f), height * r(.14f, .36f), 40, gold); tick(.6f) } }
     }
 
@@ -435,7 +228,7 @@ class FxView(ctx: Context) : View(ctx) {
             cannon(true, 90); cannon(false, 90)
         }
         flash(at, 700, 0x8CFFD278.toInt(), 0x26FFAA28)
-        banner(at, 2300, "이번 주 목표 올클리어", "주간 목표 전부 달성 · +${Xp.WEEK_BONUS} XP")
+        banner(at, 2300, "이번 주 목표 올클리어", "주간 목표 전부 달성")
         listOf(180L, 480L, 780L, 1050L).forEach { ms -> at(at + ms) { firework(width * r(.18f, .82f), height * r(.12f, .38f), 46, gold); tick(.6f) } }
     }
 
@@ -447,12 +240,12 @@ class FxView(ctx: Context) : View(ctx) {
         }
         flash(at, 1000, 0x99FFDC8C.toInt(), 0x33FFAA28)
         edge(at, 2600, 0xE6FFBE3C.toInt())
-        banner(at, 2800, "이번 달 목표 올클리어", "월간 목표 전부 달성 · +${Xp.MONTH_BONUS} XP")
+        banner(at, 2800, "이번 달 목표 올클리어", "월간 목표 전부 달성")
         repeat(8) { f -> at(at + 150 + f * 190L) { firework(width * r(.08f, .92f), height * r(.08f, .5f), 64, if (f % 2 == 1) gold else warm); tick(.7f) } }
     }
 
     // 올해: slow, ceremonial. Dim, gold motes gather into the box, a deep boom, light pillars, slow gold dust.
-    private fun ceremony(from: PointF, goal: String, s: Show) {
+    private fun ceremony(from: PointF, goal: String) {
         val d = 3200L
         val diag = hypot(width.toFloat(), height.toFloat())
         class Mote(val a: Float, val r0: Float, val sp: Float, val sz: Float, val dl: Float)
@@ -535,11 +328,6 @@ class FxView(ctx: Context) : View(ctx) {
             c.drawText(goal, 0f, 36 * dp, text); text.clearShadowLayer()
             paint.reset(); paint.isAntiAlias = true; paint.strokeWidth = dp; paint.color = 0x99FFD678.toInt(); paint.alpha = (153 * a).toInt()
             c.drawLine(-110 * dp, 54 * dp, -30 * dp, 54 * dp, paint); c.drawLine(30 * dp, 54 * dp, 110 * dp, 54 * dp, paint)
-            if (s.gain > 0) {
-                text.typeface = heavy; text.textSize = 13 * dp; text.color = 0xFFFFD66B.toInt(); text.alpha = (255 * a).toInt()
-                val label = when (s.rarity) { Xp.Rarity.NORMAL -> ""; Xp.Rarity.CRIT -> "크리티컬 ×2 · "; Xp.Rarity.JACKPOT -> "잭팟 ×5 · " }
-                c.drawText("$label+${s.gain} XP", 0f, 74 * dp, text)
-            }
             c.restore()
         }
     }
@@ -612,15 +400,12 @@ class FxView(ctx: Context) : View(ctx) {
     // Drops whatever is playing so the next play() starts on a clean stage.
     fun reset() {
         ps.clear(); es.clear(); t0 = 0L; onDone = null
-        showBar = false; landed = 0; pendingOrbs = 0; lastLand = 0L; bump = -1000L; orbN = 0; gainLabel = ""
         visibility = VISIBLE
         invalidate()
     }
 
-    fun play(s: Show, from: PointF, bar: RectF?, done: () -> Unit) {
+    fun play(s: Show, from: PointF, done: () -> Unit) {
         onDone = done
-        widgetBar = bar
-        barBase = s.before
         post {
             t0 = SystemClock.uptimeMillis(); last = t0
             stage(s, from)
@@ -629,26 +414,17 @@ class FxView(ctx: Context) : View(ctx) {
     }
 
     private fun stage(s: Show, from: PointF) {
-        val center = PointF(width / 2f, height * .36f)
         when (s.tier) {
             Tier.HABIT -> {
                 buzz(Triple(PRIMITIVE_CLICK, .8f, 0), Triple(PRIMITIVE_THUD, .5f, 30))
                 burst(from.x, from.y)
-                reward(s, from, intArrayOf(3, 5, 8), 560, small = false)
-                if (s.all) {
-                    perfectDay(950)
-                    if (s.bonus > 0) orbs(center, 6, s.bonus, 1500, orbGold, 650)
-                }
+                if (s.all) perfectDay(950)
             }
             Tier.WEEK -> {
                 buzz(Triple(PRIMITIVE_CLICK, 1f, 0), Triple(PRIMITIVE_TICK, .6f, 40), Triple(PRIMITIVE_THUD, .7f, 60))
                 burst(from.x, from.y, 1.5f)
                 edge(0, 1400, 0xBFFFC94D.toInt())
-                reward(s, from, intArrayOf(7, 10, 16), 620, small = false)
-                if (s.all) {
-                    weekAll(700)
-                    if (s.bonus > 0) orbs(center, 12, s.bonus, 1500, orbGold, 650)
-                }
+                if (s.all) weekAll(700)
             }
             Tier.MONTH -> {
                 buzz(Triple(PRIMITIVE_THUD, 1f, 0), Triple(PRIMITIVE_QUICK_RISE, .8f, 30), Triple(PRIMITIVE_CLICK, 1f, 40),
@@ -658,22 +434,16 @@ class FxView(ctx: Context) : View(ctx) {
                 edge(0, 2000, 0xBFFFB93C.toInt())
                 banner(250, 2000, "월간 목표 달성", s.title)
                 repeat(6) { f -> at(150 + f * 260L) { firework(width * r(.1f, .9f), height * r(.1f, .45f), 52, gold); tick(.6f) } }
-                reward(s, from, intArrayOf(12, 16, 22), 680, small = false)
-                if (s.all) {
-                    monthAll(1500)
-                    if (s.bonus > 0) orbs(center, 16, s.bonus, 2600, orbGold, 650)
-                }
+                if (s.all) monthAll(1500)
             }
             Tier.YEAR -> {
-                ceremony(from, s.title, s)
-                reward(s, from, intArrayOf(20, 26, 34), 900, small = false, orbFrom = PointF(width / 2f, height * .42f), orbDelay = 2000)
+                ceremony(from, s.title)
             }
             Tier.WAKE -> {
                 buzz(Triple(PRIMITIVE_QUICK_RISE, .5f, 0), Triple(PRIMITIVE_CLICK, 1f, 40), Triple(PRIMITIVE_TICK, .5f, 90))
                 sunrise(from)
                 at(300) { burst(from.x, from.y, .9f, warm, warm) }
                 caption(0, 1700, s.title, s.sub, from.y + 90 * dp, bed = false)
-                reward(s, from, intArrayOf(3, 5, 8), 620, small = false, orbDelay = 550, orbColor = 0xFFFFB547.toInt())
             }
             Tier.WAKE_LOW -> {
                 buzz(Triple(PRIMITIVE_LOW_TICK, .4f, 0))
@@ -699,10 +469,8 @@ class FxView(ctx: Context) : View(ctx) {
         live.filter { it.z < 0 }.forEach { e -> e.draw?.invoke(c, clamp((now - e.at) / e.dur.toFloat()), now) }
         step(c, dt)
         live.filter { it.z >= 0 }.forEach { e -> e.draw?.invoke(c, clamp((now - e.at) / e.dur.toFloat()), now) }
-        drawBar(c, now)
         live.forEach { if (now >= it.at + it.dur) { it.ended = true; it.end?.invoke() } }
-        val barDone = !showBar || (pendingOrbs == 0 && now > lastLand + 1000)
-        if (es.any { !it.ended } || ps.isNotEmpty() || !barDone) postInvalidateOnAnimation()
+        if (es.any { !it.ended } || ps.isNotEmpty()) postInvalidateOnAnimation()
         else onDone?.invoke().also { onDone = null }
     }
 
